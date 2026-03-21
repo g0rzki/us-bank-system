@@ -31,7 +31,6 @@ Aplikacja webowa symulująca działanie amerykańskiego banku detalicznego. Proj
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (lub Docker Engine + Compose plugin)
 - [Git](https://git-scm.com/)
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8) — tylko do lokalnego developmentu poza Dockerem
 
 ### Krok 1 — Klonowanie repo
 
@@ -40,17 +39,17 @@ git clone https://github.com/g0rzki/us-bank-system.git
 cd us-bank-system
 ```
 
-### Krok 2 — Konfiguracja sekretów (lokalny development)
+### Krok 2 — Konfiguracja środowiska
 
-Skopiuj szablon konfiguracji i uzupełnij wartości:
+Skopiuj szablon zmiennych środowiskowych:
 
 ```bash
-cp src/UsBankSystem.Api/appsettings.Development.template.json src/UsBankSystem.Api/appsettings.Development.json
+cp .env.example .env
 ```
 
-Plik `appsettings.Development.json` jest wykluczony z gita (`.gitignore`) — nie commituj go.
+Plik `.env` jest wykluczony z gita — nie commituj go.
 
-### Krok 3 — Uruchomienie przez Docker Compose
+### Krok 3 — Uruchomienie
 
 ```bash
 docker compose up --build
@@ -65,15 +64,12 @@ Aplikacja dostępna pod:
 | Frontend | http://localhost:3000 |
 | API | http://localhost:5000 |
 | Swagger UI | http://localhost:5000/swagger |
-| pgAdmin | http://localhost:5050 |
-
-pgAdmin login: `admin@usbank.local` / `admin`
 
 ### Krok 4 — Migracje bazy danych
 
-Migracje są uruchamiane **automatycznie** przy starcie kontenera API. Nic nie trzeba robić ręcznie.
+Migracje uruchamiane są automatycznie przy starcie kontenera API.
 
-Jeśli chcesz uruchomić je manualnie (lokalny development poza Dockerem):
+Jeśli chcesz uruchomić je manualnie:
 
 ```bash
 cd src/UsBankSystem.Api
@@ -94,47 +90,21 @@ docker compose down -v
 
 ---
 
-## Lokalny development (bez Dockera)
-
-Jeśli chcesz uruchomić API bezpośrednio przez Ridera lub CLI bez Dockera, potrzebujesz lokalnej instancji PostgreSQL na porcie `5432` z bazą `usbank`.
-
-Uruchomienie samej bazy przez Docker (bez API):
-
-```bash
-docker compose up db pgadmin
-```
-
-Potem uruchom API z Ridera lub:
-
-```bash
-cd src/UsBankSystem.Api
-dotnet run
-```
-
-Frontend (wymaga Node.js 20+):
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
----
-
 ## Struktura projektu
 
 ```
 us-bank-system/
 ├── src/
-│   ├── UsBankSystem.Api/           # ASP.NET Core Web API
-│   ├── UsBankSystem.Core/          # Domain entities, interfaces
-│   └── UsBankSystem.Infrastructure/# EF Core, repositories
-├── frontend/                       # React + Vite SPA
+│   ├── UsBankSystem.Api/             # ASP.NET Core Web API
+│   ├── UsBankSystem.Core/            # Domain entities, interfaces
+│   └── UsBankSystem.Infrastructure/  # EF Core, repositories
+├── frontend/                         # React + Vite SPA
 ├── docs/
-│   ├── domain.md                   # Wiedza domenowa
-│   ├── uml/                        # Diagramy UML
-│   └── bpmn/                       # Diagramy BPMN
+│   ├── domain.md                     # Wiedza domenowa
+│   ├── uml/                          # Diagramy UML
+│   └── bpmn/                         # Diagramy BPMN
 ├── docker-compose.yml
+├── .env.example
 └── README.md
 ```
 
@@ -165,7 +135,7 @@ Główne endpointy:
 
 ## Integracje zewnętrzne
 
-Projekt integruje się z modułami tworzonymi przez inne grupy. Adresy konfigurowane przez zmienne środowiskowe w Docker Compose:
+Projekt integruje się z modułami tworzonymi przez inne grupy. Adresy konfigurowane przez zmienne środowiskowe w `.env`:
 
 ```
 Integrations__AchUrl=http://ach-module

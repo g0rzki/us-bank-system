@@ -1,0 +1,49 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: src/UsBankSystem.Api/Dockerfile
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Default=Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      - Jwt__Secret=${JWT_SECRET}
+      - Integrations__AchUrl=${INTEGRATIONS_ACH_URL}
+      - Integrations__SwiftUrl=${INTEGRATIONS_SWIFT_URL}
+      - Integrations__CardsUrl=${INTEGRATIONS_CARDS_URL}
+      - Integrations__BlikUrl=${INTEGRATIONS_BLIK_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
