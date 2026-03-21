@@ -9,7 +9,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Transfer> Transfers => Set<Transfer>();
-
+    public DbSet<Card> Cards => Set<Card>();
+    public DbSet<BlikCode> BlikCodes => Set<BlikCode>();
+    
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -61,6 +63,25 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany()
              .HasForeignKey(t => t.ToAccountId)
              .OnDelete(DeleteBehavior.Restrict);
+        });
+        
+        modelBuilder.Entity<Card>(e =>
+        {
+            e.HasKey(c => c.Id);
+            e.Property(c => c.Last4).IsRequired().HasMaxLength(4);
+            e.Property(c => c.Type).IsRequired().HasMaxLength(10);
+            e.HasOne(c => c.Account)
+                .WithMany(a => a.Cards)
+                .HasForeignKey(c => c.AccountId);
+        });
+
+        modelBuilder.Entity<BlikCode>(e =>
+        {
+            e.HasKey(b => b.Id);
+            e.Property(b => b.CodeHash).IsRequired();
+            e.HasOne(b => b.Account)
+                .WithMany(a => a.BlikCodes)
+                .HasForeignKey(b => b.AccountId);
         });
     }
 }
