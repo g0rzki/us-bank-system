@@ -52,6 +52,9 @@ appsettings.Development.json
 appsettings.Local.json
 secrets.json
 
+# launchSettings.json — lokalna konfiguracja Ridera (każdy ma swój)
+**/Properties/launchSettings.json
+
 # Entity Framework migrations snapshots (opcjonalnie — zakomentuj jeśli chcesz je śledzić)
 # **/Migrations/
 
