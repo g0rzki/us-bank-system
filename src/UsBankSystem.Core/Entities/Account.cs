@@ -14,4 +14,6 @@ public class Account
     public User User { get; set; } = null!;
     public List<Transaction> Transactions { get; set; } = [];
     public List<Transfer> Transfers { get; set; } = [];
+    public List<Card> Cards { get; set; } = [];
+    public List<BlikCode> BlikCodes { get; set; } = [];
 }
