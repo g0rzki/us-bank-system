@@ -39,17 +39,48 @@ git clone https://github.com/g0rzki/us-bank-system.git
 cd us-bank-system
 ```
 
-### Krok 2 — Konfiguracja środowiska
+### Krok 2 — Konfiguracja zmiennych środowiskowych
 
-Skopiuj szablon zmiennych środowiskowych:
+Skopiuj szablon i uzupełnij swoimi danymi:
 
 ```bash
 cp .env.example .env
 ```
 
-Plik `.env` jest wykluczony z gita — nie commituj go.
+Otwórz `.env` i uzupełnij:
 
-### Krok 3 — Uruchomienie
+```env
+POSTGRES_DB=usbank          # nazwa bazy — zostaw bez zmian
+POSTGRES_USER=twoj_user     # dowolna nazwa użytkownika bazy
+POSTGRES_PASSWORD=twoje_haslo
+POSTGRES_PORT=5433          # port na hoście (5433 jeśli lokalny postgres zajmuje 5432)
+JWT_SECRET=min_32_znaki     # dowolny ciąg min. 32 znaków
+INTEGRATIONS_ACH_URL=http://localhost:6001
+INTEGRATIONS_SWIFT_URL=http://localhost:6002
+INTEGRATIONS_CARDS_URL=http://localhost:6003
+INTEGRATIONS_BLIK_URL=http://localhost:6004
+```
+
+> Plik `.env` jest wykluczony z gita — nie commituj go.
+
+### Krok 3 — Konfiguracja Ridera
+
+Skopiuj szablon `launchSettings.json`:
+
+```bash
+cp src/UsBankSystem.Api/Properties/launchSettings.template.json src/UsBankSystem.Api/Properties/launchSettings.json
+```
+
+Otwórz `launchSettings.json` i uzupełnij wartości w profilu `http` danymi z `.env`:
+
+```json
+"ConnectionStrings__Default": "Host=localhost;Port=5433;Database=usbank;Username=POSTGRES_USER;Password=POSTGRES_PASSWORD",
+"Jwt__Secret": "JWT_SECRET"
+```
+
+> Plik `launchSettings.json` jest wykluczony z gita — nie commituj go.
+
+### Krok 4 — Uruchomienie
 
 ```bash
 docker compose up --build
@@ -64,17 +95,7 @@ Aplikacja dostępna pod:
 | Frontend | http://localhost:3000 |
 | API | http://localhost:5000 |
 | Swagger UI | http://localhost:5000/swagger |
-
-### Krok 4 — Migracje bazy danych
-
-Migracje uruchamiane są automatycznie przy starcie kontenera API.
-
-Jeśli chcesz uruchomić je manualnie:
-
-```bash
-cd src/UsBankSystem.Api
-dotnet ef database update
-```
+| Health check | http://localhost:5000/health |
 
 ### Zatrzymanie aplikacji
 
@@ -103,7 +124,7 @@ us-bank-system/
 │   ├── domain.md                     # Wiedza domenowa
 │   ├── uml/                          # Diagramy UML
 │   └── bpmn/                         # Diagramy BPMN
-├── docker-compose.yml
+├── docker-compose.yaml
 ├── .env.example
 └── README.md
 ```
@@ -138,10 +159,10 @@ Główne endpointy:
 Projekt integruje się z modułami tworzonymi przez inne grupy. Adresy konfigurowane przez zmienne środowiskowe w `.env`:
 
 ```
-Integrations__AchUrl=http://ach-module
-Integrations__SwiftUrl=http://swift-module
-Integrations__CardsUrl=http://cards-module
-Integrations__BlikUrl=http://blik-module
+INTEGRATIONS_ACH_URL=http://ach-module
+INTEGRATIONS_SWIFT_URL=http://swift-module
+INTEGRATIONS_CARDS_URL=http://cards-module
+INTEGRATIONS_BLIK_URL=http://blik-module
 ```
 
 W środowisku deweloperskim używane są lokalne stuby HTTP (mock serwisy).
@@ -168,7 +189,7 @@ W środowisku deweloperskim używane są lokalne stuby HTTP (mock serwisy).
 
 ## Zespół
 
-| Osoba                                          | Zakres |
-|------------------------------------------------|---|
+| Osoba | Zakres |
+|---|---|
 | [Piotr Gorzkiewicz](https://github.com/g0rzki) | Backend core, Docker, integracje ACH/SWIFT |
-| [Jakub Siłka](https://github.com/jakub7038)    | Auth, frontend, karty, BLIK-USD |
+| [Jakub Siłka](https://github.com/jakub7038) | Auth, frontend, karty, BLIK-USD |
