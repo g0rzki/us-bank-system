@@ -47,6 +47,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(t => t.Account)
              .WithMany(a => a.Transactions)
              .HasForeignKey(t => t.AccountId);
+            e.HasIndex(t => new { t.AccountId, t.CreatedAt });
         });
 
         modelBuilder.Entity<Transfer>(e =>
@@ -63,6 +64,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany()
              .HasForeignKey(t => t.ToAccountId)
              .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(t => t.FromAccountId);
+            e.HasIndex(t => t.Status);
         });
         
         modelBuilder.Entity<Card>(e =>
@@ -73,6 +76,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(c => c.Account)
                 .WithMany(a => a.Cards)
                 .HasForeignKey(c => c.AccountId);
+            e.HasIndex(c => c.AccountId);
         });
 
         modelBuilder.Entity<BlikCode>(e =>
@@ -82,6 +86,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(b => b.Account)
                 .WithMany(a => a.BlikCodes)
                 .HasForeignKey(b => b.AccountId);
+            e.HasIndex(b => new { b.AccountId, b.ExpiresAt });
         });
     }
 }
