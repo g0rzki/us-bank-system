@@ -169,6 +169,24 @@ W środowisku deweloperskim używane są lokalne stuby HTTP (mock serwisy).
 
 ---
 
+## Migracje bazy danych
+
+Projekt używa Entity Framework Core do zarządzania schematem bazy danych.
+
+### Tworzenie nowej migracji
+
+```bash
+dotnet ef migrations add NazwaMigracji -p src/UsBankSystem.Infrastructure -s src/UsBankSystem.Api
+```
+
+### Aplikowanie migracji do bazy
+
+```bash
+dotnet ef database update -p src/UsBankSystem.Infrastructure -s src/UsBankSystem.Api --connection "Host=localhost;Port=5433;Database=usbank;Username=app;Password=secret"
+```
+
+---
+
 ## Workflow Git
 
 - Główne gałęzie: `main` (produkcja), `develop` (integracja)
