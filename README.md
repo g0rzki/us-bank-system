@@ -189,10 +189,27 @@ dotnet ef database update -p src/UsBankSystem.Infrastructure -s src/UsBankSystem
 
 ## Workflow Git
 
-- Główne gałęzie: `main` (produkcja), `develop` (integracja)
-- Feature branche: `feature/US-XX-krotki-opis`
-- Każda zmiana przez Pull Request z code review
-- Format commitów: `Feat: krótki opis` / `Fix: ...` / `Docs: ...`
+- Gałąź `main` — każda zmiana przez PR z 1 approvem drugiego członka zespołu
+- Feature branche: `feature/US-XX-krotki-opis`, tworzone od `main`
+- Commity mergowane przez **Squash and merge**
+- Nie merguj własnego PR bez review drugiej osoby
+
+### Format commitów
+
+```
+Feat: krótki opis       # nowa funkcjonalność
+Fix: krótki opis        # naprawa błędu
+Docs: krótki opis       # dokumentacja
+Refactor: krótki opis   # refaktor bez zmiany funkcjonalności
+```
+
+### Tworzenie feature brancha
+
+```bash
+git checkout main
+git pull
+git checkout -b feature/US-XX-krotki-opis
+```
 
 ---
 
