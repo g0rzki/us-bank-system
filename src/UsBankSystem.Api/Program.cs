@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using UsBankSystem.Api.Extensions;
+using UsBankSystem.Api.Middleware;
 using UsBankSystem.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -48,6 +49,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
