@@ -4,12 +4,14 @@ Aplikacja webowa symulująca działanie amerykańskiego banku detalicznego. Proj
 
 ## Zakres
 
-- Zarządzanie kontami (checking / savings)
-- Przelewy wewnętrzne i zewnętrzne
-- Integracja z ACH, RTP, FedNow, SWIFT
-- Obsługa kart płatniczych
-- BLIK-USD — mobilne płatności w dolarach
-- Panel zarządzania kontem
+- Przelewy wewnętrzne między kontami
+- ACH — standardowy przelew międzybankowy (rozliczenie T+1)
+- RTP — natychmiastowy przelew konsumencki (real-time, 24/7)
+- FedNow — przelew RTGS przez bank centralny
+- SWIFT — przelew międzynarodowy
+- Karty płatnicze (integracja) — transakcje tylko w USD
+- BLIK — przelewy natychmiastowe (integracja)
+- Konto dla młodych — zależne od konta rodzica, limity transakcji
 
 ## Stack
 
@@ -56,9 +58,11 @@ POSTGRES_PASSWORD=twoje_haslo
 POSTGRES_PORT=5433          # port na hoście (5433 jeśli lokalny postgres zajmuje 5432)
 JWT_SECRET=min_32_znaki     # dowolny ciąg min. 32 znaków
 INTEGRATIONS_ACH_URL=http://localhost:6001
-INTEGRATIONS_SWIFT_URL=http://localhost:6002
-INTEGRATIONS_CARDS_URL=http://localhost:6003
-INTEGRATIONS_BLIK_URL=http://localhost:6004
+INTEGRATIONS_RTP_URL=http://localhost:6002
+INTEGRATIONS_FEDNOW_URL=http://localhost:6003
+INTEGRATIONS_SWIFT_URL=http://localhost:6004
+INTEGRATIONS_CARDS_URL=http://localhost:6005
+INTEGRATIONS_BLIK_URL=http://localhost:6006
 ```
 
 > Plik `.env` jest wykluczony z gita — nie commituj go.
@@ -143,14 +147,23 @@ Główne endpointy:
 | POST | /auth/login | Logowanie, zwraca JWT |
 | GET | /accounts/{id} | Dane konta |
 | GET | /accounts/{id}/balance | Saldo |
-| GET | /accounts/{id}/transactions | Historia transakcji |
+| GET | /accounts/{id}/transactions | Historia transakcji z paginacją |
+| POST | /accounts | Tworzenie konta checking/savings |
+| POST | /accounts/youth | Tworzenie konta dla młodych |
+| GET | /accounts/{id}/youth-accounts | Lista kont youth (widok rodzica) |
+| GET | /accounts/{id}/youth-details | Szczegóły konta youth |
+| PATCH | /accounts/{id}/youth-limit | Zmiana limitu przez rodzica |
 | POST | /transfers/internal | Przelew wewnętrzny |
-| POST | /transfers/ach | Przelew ACH |
-| POST | /transfers/rtp | Przelew RTP / FedNow |
+| POST | /transfers/ach | Przelew ACH (T+1) |
+| POST | /transfers/rtp | Przelew RTP (real-time) |
+| POST | /transfers/fednow | Przelew FedNow (RTGS) |
 | POST | /transfers/swift | Przelew SWIFT |
 | GET | /transfers/{id}/status | Status przelewu |
-| POST | /blik/generate | Generowanie kodu BLIK-USD |
-| POST | /blik/verify | Weryfikacja kodu (dla systemu BLIK) |
+| GET | /accounts/{id}/cards | Lista kart konta |
+| POST | /cards/register | Rejestracja karty |
+| POST | /cards/authorize | Webhook autoryzacji kartowej |
+| POST | /blik/generate | Generowanie kodu BLIK |
+| POST | /blik/verify | Weryfikacja kodu BLIK |
 
 ---
 
@@ -160,12 +173,14 @@ Projekt integruje się z modułami tworzonymi przez inne grupy. Adresy konfiguro
 
 ```
 INTEGRATIONS_ACH_URL=http://ach-module
+INTEGRATIONS_RTP_URL=http://rtp-module
+INTEGRATIONS_FEDNOW_URL=http://fednow-module
 INTEGRATIONS_SWIFT_URL=http://swift-module
 INTEGRATIONS_CARDS_URL=http://cards-module
 INTEGRATIONS_BLIK_URL=http://blik-module
 ```
 
-W środowisku deweloperskim używane są lokalne stuby HTTP (mock serwisy).
+W środowisku deweloperskim każda integracja działa przez lokalny mock stub. Zamiana na produkcyjny moduł = zmiana URL w `.env`.
 
 ---
 
@@ -182,7 +197,7 @@ dotnet ef migrations add NazwaMigracji -p src/UsBankSystem.Infrastructure -s src
 ### Aplikowanie migracji do bazy
 
 ```bash
-dotnet ef database update -p src/UsBankSystem.Infrastructure -s src/UsBankSystem.Api --connection "Host=localhost;Port=5433;Database=usbank;Username=app;Password=secret"
+dotnet ef database update -p src/UsBankSystem.Infrastructure -s src/UsBankSystem.Api --connection "Host=localhost;Port=5433;Database=usbank;Username=POSTGRES_USER;Password=POSTGRES_PASSWORD"
 ```
 
 ---
@@ -190,6 +205,7 @@ dotnet ef database update -p src/UsBankSystem.Infrastructure -s src/UsBankSystem
 ## Workflow Git
 
 - Gałąź `main` — każda zmiana przez PR z 1 approvem drugiego członka zespołu
+- Gałąź `develoo` - integracje z zewnętrznymi modułami innych grup
 - Feature branche: `feature/US-XX-krotki-opis`, tworzone od `main`
 - Commity mergowane przez **Squash and merge**
 - Nie merguj własnego PR bez review drugiej osoby
@@ -226,5 +242,5 @@ git checkout -b feature/US-XX-krotki-opis
 
 | Osoba | Zakres |
 |---|---|
-| [Piotr Gorzkiewicz](https://github.com/g0rzki) | Backend core, Docker, integracje ACH/SWIFT |
-| [Jakub Siłka](https://github.com/jakub7038) | Auth, frontend, karty, BLIK-USD |
+| [Piotr Gorzkiewicz](https://github.com/g0rzki) | Backend core, przelewy zewnętrzne, konto youth, BLIK |
+| [Jakub Siłka](https://github.com/jakub7038) | Auth, frontend, karty, SWIFT |
