@@ -234,7 +234,7 @@ public static class DbSeeder
                 Id = Guid.NewGuid(),
                 AccountId = account1Checking.Id,
                 Last4 = "1234",
-                Type = "credit",
+                Type = "debit",
                 Status = "blocked",
                 ExternalCardToken = "tok_mc_credit_001",
                 ExpiresAt = DateTime.UtcNow.AddMonths(-2),
