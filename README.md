@@ -11,7 +11,7 @@ Aplikacja webowa symulująca działanie amerykańskiego banku detalicznego. Proj
 - SWIFT — przelew międzynarodowy
 - Karty płatnicze (integracja) — transakcje tylko w USD
 - BLIK — przelewy natychmiastowe (integracja)
-- Konto dla młodych — zależne od konta rodzica, limity transakcji
+- Konto junior (7-13 lat) — podpięte do konta rodzica, wszystkie transakcje wymagają zatwierdzenia przez rodzica, możliwość podpięcia karty prepaid z limitami
 
 ## Stack
 
@@ -25,6 +25,131 @@ Aplikacja webowa symulująca działanie amerykańskiego banku detalicznego. Proj
 | Auth | JWT Bearer Tokens |
 | Konteneryzacja | Docker + Docker Compose |
 
+---
+
+## Wiedza domenowa
+
+### ACH (Automated Clearing House)
+> 📝 TODO (US-57) — opis mechanizmu, okna czasowe batch, rozliczenie T+1, rola NACHA
+
+### RTP (Real-Time Payments)
+> 📝 TODO (US-57) — opis mechanizmu, rozliczenie natychmiastowe 24/7, rola The Clearing House
+
+### FedNow
+> 📝 TODO (US-57) — opis mechanizmu RTGS, rola Fed Reserve, różnica vs RTP
+
+### SWIFT
+> 📝 TODO (US-57) — opis sieci korespondentów, IBAN, BIC, SWIFT gpi
+
+### Karty płatnicze
+> 📝 TODO (US-58) — opis autoryzacji, rozliczenia, rola issuera, acquirera, sieci kartowej
+
+### BLIK
+> 📝 TODO (US-58) — opis mechanizmu, kod 6-cyfrowy, settlement przez RTP
+
+### Konto junior
+> 📝 TODO (US-58) — opis mechanizmu zatwierdzania transakcji przez rodzica, karta prepaid, limity
+ 
+---
+
+## Diagramy
+
+### Model domenowy (UML Class Diagram)
+
+> 📝 TODO (US-52) — diagram klas: User, Account, JuniorAccount, Transaction, Transfer, Card, BlikCode
+> Narzędzie: Mermaid lub draw.io
+
+```mermaid
+%% TODO (US-52): Uzupełnić diagram modelu domenowego
+classDiagram
+    class User
+    class Account
+    class JuniorAccount
+    class Transaction
+    class Transfer
+    class Card
+    class BlikCode
+```
+
+### Przepływ przelewu ACH (BPMN)
+
+> 📝 TODO (US-53) — diagram przepływu: inicjacja → batch → clearing → settlement → status
+
+```mermaid
+%% TODO (US-53): Uzupełnić diagram BPMN przepływu ACH
+flowchart LR
+    A[Inicjacja ACH] --> B[Batch window]
+    B --> C[Clearing]
+    C --> D[Settlement T+1]
+    D --> E[Status update]
+```
+
+### Przepływ przelewu FedNow (BPMN)
+
+> 📝 TODO (US-53) — diagram przepływu: inicjacja → walidacja → RTGS → settlement natychmiastowy
+
+```mermaid
+%% TODO (US-53): Uzupełnić diagram BPMN przepływu FedNow
+flowchart LR
+    A[Inicjacja FedNow] --> B[Walidacja]
+    B --> C[RTGS Fed Reserve]
+    C --> D[Settlement natychmiastowy]
+```
+
+### Przepływ BLIK (BPMN)
+
+> 📝 TODO (US-54) — diagram przepływu: generowanie kodu → weryfikacja → settlement RTP
+
+```mermaid
+%% TODO (US-54): Uzupełnić diagram BPMN przepływu BLIK
+flowchart LR
+    A[Generowanie kodu] --> B[Weryfikacja]
+    B --> C[Settlement RTP]
+```
+
+### Przepływ zatwierdzania transakcji junior (BPMN)
+
+> 📝 TODO (US-54) — diagram przepływu: transakcja pending → powiadomienie rodzica → approve/reject
+
+```mermaid
+%% TODO (US-54): Uzupełnić diagram BPMN zatwierdzania transakcji junior
+flowchart LR
+    A[Transakcja junior] --> B[Status: pending_approval]
+    B --> C[Rodzic zatwierdza / odrzuca]
+    C --> D[Wykonanie / anulowanie]
+```
+ 
+---
+
+## Konfiguracja sesji płatności
+
+Plik `src/UsBankSystem.Api/payment-config.json` pozwala konfigurować parametry czasowe systemów płatności. W środowisku deweloperskim skracasz wartości żeby testować integracje bez czekania na prawdziwe okna czasowe.
+
+```json
+{
+  "PaymentSessions": {
+    "Ach": {
+      "BatchWindowMinutes": 1,
+      "CutoffHour": 23
+    },
+    "FedNow": {
+      "TimeoutSeconds": 10
+    },
+    "Rtp": {
+      "TimeoutSeconds": 10
+    },
+    "Swift": {
+      "TimeoutSeconds": 30
+    }
+  }
+}
+```
+
+Wartości produkcyjne:
+- ACH batch window: ~2-3h, cutoff: 17:00 ET
+- FedNow timeout: 20s
+- RTP timeout: 10s
+- SWIFT: 1-5 dni roboczych
 ---
 
 ## Uruchomienie
@@ -121,13 +246,10 @@ docker compose down -v
 us-bank-system/
 ├── src/
 │   ├── UsBankSystem.Api/             # ASP.NET Core Web API
+│   │   └── payment-config.json       # konfiguracja sesji płatności
 │   ├── UsBankSystem.Core/            # Domain entities, interfaces
 │   └── UsBankSystem.Infrastructure/  # EF Core, repositories
 ├── frontend/                         # React + Vite SPA
-├── docs/
-│   ├── domain.md                     # Wiedza domenowa
-│   ├── uml/                          # Diagramy UML
-│   └── bpmn/                         # Diagramy BPMN
 ├── docker-compose.yaml
 ├── .env.example
 └── README.md
@@ -149,10 +271,13 @@ Główne endpointy:
 | GET | /accounts/{id}/balance | Saldo |
 | GET | /accounts/{id}/transactions | Historia transakcji z paginacją |
 | POST | /accounts | Tworzenie konta checking/savings |
-| POST | /accounts/youth | Tworzenie konta dla młodych |
-| GET | /accounts/{id}/youth-accounts | Lista kont youth (widok rodzica) |
-| GET | /accounts/{id}/youth-details | Szczegóły konta youth |
-| PATCH | /accounts/{id}/youth-limit | Zmiana limitu przez rodzica |
+| POST | /accounts/junior | Tworzenie konta junior (wymaga parent_account_id) |
+| GET | /accounts/{id}/junior-accounts | Lista kont junior (widok rodzica) |
+| GET | /accounts/{id}/junior-details | Szczegóły konta junior |
+| PATCH | /accounts/{id}/junior-limit | Zmiana limitu karty prepaid przez rodzica |
+| GET | /transfers/pending-approval | Lista transakcji czekających na zatwierdzenie (rodzic) |
+| POST | /transfers/{id}/approve | Zatwierdzenie transakcji junior przez rodzica |
+| POST | /transfers/{id}/reject | Odrzucenie transakcji junior przez rodzica |
 | POST | /transfers/internal | Przelew wewnętrzny |
 | POST | /transfers/ach | Przelew ACH (T+1) |
 | POST | /transfers/rtp | Przelew RTP (real-time) |
@@ -205,7 +330,7 @@ dotnet ef database update -p src/UsBankSystem.Infrastructure -s src/UsBankSystem
 ## Workflow Git
 
 - Gałąź `main` — każda zmiana przez PR z 1 approvem drugiego członka zespołu
-- Gałąź `develoo` - integracje z zewnętrznymi modułami innych grup
+- Gałąź `develop` - integracje z zewnętrznymi modułami innych grup
 - Feature branche: `feature/US-XX-krotki-opis`, tworzone od `main`
 - Commity mergowane przez **Squash and merge**
 - Nie merguj własnego PR bez review drugiej osoby
@@ -231,16 +356,14 @@ git checkout -b feature/US-XX-krotki-opis
 
 ## Dokumentacja
 
-- [Wiedza domenowa (ACH, RTP, FedNow, SWIFT, BLIK-USD)](docs/domain.md)
-- [Diagramy UML](docs/uml/)
-- [Diagramy BPMN](docs/bpmn/)
 - [Backlog — Trello](https://trello.com/b/SoYXGs0x/tablica-projektowa)
+- [Swagger UI](http://localhost:5000/swagger) — po uruchomieniu aplikacji
 
 ---
 
 ## Zespół
 
-| Osoba | Zakres |
-|---|---|
-| [Piotr Gorzkiewicz](https://github.com/g0rzki) | Backend core, przelewy zewnętrzne, konto youth, BLIK |
-| [Jakub Siłka](https://github.com/jakub7038) | Auth, frontend, karty, SWIFT |
+| Osoba | Zakres                                                |
+|---|-------------------------------------------------------|
+| [Piotr Gorzkiewicz](https://github.com/g0rzki) | Backend core, przelewy zewnętrzne, konto junior, BLIK |
+| [Jakub Siłka](https://github.com/jakub7038) | Auth, frontend, karty, SWIFT                          |
