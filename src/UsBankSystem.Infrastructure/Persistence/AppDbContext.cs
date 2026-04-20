@@ -73,6 +73,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasKey(c => c.Id);
             e.Property(c => c.Last4).IsRequired().HasMaxLength(4);
             e.Property(c => c.Type).IsRequired().HasMaxLength(10);
+            e.Property(c => c.DailyLimit).HasPrecision(18, 2);
+            e.Property(c => c.MonthlyLimit).HasPrecision(18, 2);
             e.HasOne(c => c.Account)
                 .WithMany(a => a.Cards)
                 .HasForeignKey(c => c.AccountId);
