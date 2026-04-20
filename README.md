@@ -311,18 +311,12 @@ W środowisku deweloperskim każda integracja działa przez lokalny mock stub. Z
 
 ## Migracje bazy danych
 
-Projekt używa Entity Framework Core do zarządzania schematem bazy danych.
+Projekt używa Entity Framework Core. Migracje aplikują się **automatycznie** przy starcie aplikacji (`docker compose up --build`).
 
 ### Tworzenie nowej migracji
 
 ```bash
 dotnet ef migrations add NazwaMigracji -p src/UsBankSystem.Infrastructure -s src/UsBankSystem.Api
-```
-
-### Aplikowanie migracji do bazy
-
-```bash
-dotnet ef database update -p src/UsBankSystem.Infrastructure -s src/UsBankSystem.Api --connection "Host=localhost;Port=5433;Database=usbank;Username=POSTGRES_USER;Password=POSTGRES_PASSWORD"
 ```
 
 ---
