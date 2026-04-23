@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Infrastructure.Persistence;
@@ -17,11 +18,19 @@ public class RegisterTests
         return new AppDbContext(options);
     }
 
+    private IConfiguration CreateConfig() =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Secret"] = "test_secret_minimum_32_characters_required!"
+            })
+            .Build();
+
     [Fact]
     public async Task Register_ValidRequest_Returns201()
     {
         var db = CreateDb();
-        var controller = new AuthController(db);
+        var controller = new AuthController(db, CreateConfig());
 
         var result = await controller.Register(new RegisterRequest
         {
@@ -39,7 +48,7 @@ public class RegisterTests
     public async Task Register_DuplicateEmail_Returns409()
     {
         var db = CreateDb();
-        var controller = new AuthController(db);
+        var controller = new AuthController(db, CreateConfig());
         var request = new RegisterRequest
         {
             Email = "duplicate@example.com",
@@ -59,7 +68,7 @@ public class RegisterTests
     public async Task Register_EmailStoredAsLowercase()
     {
         var db = CreateDb();
-        var controller = new AuthController(db);
+        var controller = new AuthController(db, CreateConfig());
 
         await controller.Register(new RegisterRequest
         {
@@ -77,7 +86,7 @@ public class RegisterTests
     public async Task Register_PasswordIsHashed()
     {
         var db = CreateDb();
-        var controller = new AuthController(db);
+        var controller = new AuthController(db, CreateConfig());
 
         await controller.Register(new RegisterRequest
         {
@@ -96,7 +105,7 @@ public class RegisterTests
     public async Task Register_UserSavedToDatabase()
     {
         var db = CreateDb();
-        var controller = new AuthController(db);
+        var controller = new AuthController(db, CreateConfig());
 
         await controller.Register(new RegisterRequest
         {
