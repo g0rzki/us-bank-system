@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using UsBankSystem.Api.Models.Auth;
+using UsBankSystem.Core.Domain.Common;
 using UsBankSystem.Core.Entities;
 using UsBankSystem.Infrastructure.Persistence;
 
@@ -24,7 +25,7 @@ public class AuthService(AppDbContext db, IConfiguration config)
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             FirstName = request.FirstName,
             LastName = request.LastName,
-            Status = "active",
+            Status = UserStatus.Active,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -40,7 +41,7 @@ public class AuthService(AppDbContext db, IConfiguration config)
         if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             return (false, "Invalid email or password", null);
 
-        if (user.Status != "active")
+        if (user.Status != UserStatus.Active)
             return (false, "Account is not active", null);
 
         return (true, null, GenerateJwt(user));
