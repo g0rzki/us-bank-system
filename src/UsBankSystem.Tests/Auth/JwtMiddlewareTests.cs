@@ -107,4 +107,26 @@ public class JwtMiddlewareTests : IClassFixture<WebApplicationFactory<Program>>
         }));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Me_ValidToken_Returns200WithEmailAndId()
+    {
+        var client = CreateClient();
+        var token = await GetToken(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var response = await client.GetAsync("/auth/me");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.False(string.IsNullOrEmpty(body.GetProperty("id").GetString()));
+        Assert.Equal("jwt@example.com", body.GetProperty("email").GetString());
+    }
+
+    [Fact]
+    public async Task Me_NoToken_Returns401()
+    {
+        var client = CreateClient();
+        var response = await client.GetAsync("/auth/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 }
