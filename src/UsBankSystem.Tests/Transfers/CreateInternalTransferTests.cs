@@ -8,6 +8,7 @@ using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
+using UsBankSystem.Core.Domain.Common;
 using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Infrastructure.Persistence;
 
@@ -186,5 +187,22 @@ public class CreateInternalTransferTests
             Currency = "EUR"
         });
         Assert.IsType<BadRequestObjectResult>(result);
+    }
+    
+    [Fact]
+    public async Task CreateInternal_BlockedAccount_Returns404()
+    {
+        var (db, userId, fromAccountId, toAccountId) = await Setup();
+        var account = await db.Accounts.FindAsync(fromAccountId);
+        account!.Status = AccountStatus.Blocked;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId);
+        var result = await controller.CreateInternal(new CreateInternalTransferRequest
+        {
+            FromAccountId = fromAccountId,
+            ToAccountId = toAccountId,
+            Amount = 100m
+        });
+        Assert.IsType<NotFoundObjectResult>(result);
     }
 }
