@@ -57,4 +57,20 @@ public class AccountsController(AccountService accountService) : ControllerBase
             _ => Ok(result)
         };
     }
+    
+    [HttpGet("{id:guid}/transactions")]
+    [ProducesResponseType(typeof(PagedResponse<TransactionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetTransactions(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        var (success, error, statusCode, result) = await accountService.GetTransactionsAsync(userId, id, page, pageSize);
+        return statusCode switch
+        {
+            404 => NotFound(new { message = error }),
+            403 => Forbid(),
+            _ => Ok(result)
+        };
+    }
 }
