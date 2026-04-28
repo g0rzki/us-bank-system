@@ -35,6 +35,12 @@ public class TransferService(AppDbContext db)
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
             return (false, "Insufficient funds", 400, null);
+        
+        // Sprawdź dzienny limit transferów
+        var dailyLimit = await GetDailyTransferLimitAsync(fromAccount.Id);
+        var todayTotal = await GetTodayTransferTotalAsync(fromAccount.Id);
+        if (dailyLimit.HasValue && todayTotal + request.Amount > dailyLimit.Value)
+            return (false, $"Daily transfer limit exceeded. Limit: {dailyLimit}, used: {todayTotal}, requested: {request.Amount}", 400, null);
 
         var requiresApproval = isJuniorAccount;
         var status = requiresApproval ? TransferStatus.PendingApproval : TransferStatus.Pending;
@@ -110,5 +116,23 @@ public class TransferService(AppDbContext db)
             CompletedAt = transfer.CompletedAt,
             RequiresApproval = transfer.RequiresApproval
         });
+    }
+    
+    private async Task<decimal?> GetDailyTransferLimitAsync(Guid accountId)
+    {
+        // Karta prepaid junior ma limit — na razie zwracamy null (brak limitu)
+        // TODO: US-30 — podpiąć limit z JuniorAccount/Card
+        return await Task.FromResult<decimal?>(null);
+    }
+
+    private async Task<decimal> GetTodayTransferTotalAsync(Guid accountId)
+    {
+        var today = DateTime.UtcNow.Date;
+        return await db.Transfers
+            .Where(t => t.FromAccountId == accountId
+                        && t.CreatedAt >= today
+                        && t.Status != TransferStatus.Rejected
+                        && t.Status != TransferStatus.Failed)
+            .SumAsync(t => t.Amount);
     }
 }
