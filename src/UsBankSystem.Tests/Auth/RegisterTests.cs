@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Models.Auth;
+using UsBankSystem.Api.Services;
 using UsBankSystem.Infrastructure.Persistence;
 
 namespace UsBankSystem.Tests.Auth;
@@ -26,11 +27,13 @@ public class RegisterTests
             })
             .Build();
 
+    private AuthController CreateController(AppDbContext db) =>
+        new(new AuthService(db, CreateConfig()));
+
     [Fact]
     public async Task Register_ValidRequest_Returns201()
     {
-        var db = CreateDb();
-        var controller = new AuthController(db, CreateConfig());
+        var controller = CreateController(CreateDb());
 
         var result = await controller.Register(new RegisterRequest
         {
@@ -48,7 +51,7 @@ public class RegisterTests
     public async Task Register_DuplicateEmail_Returns409()
     {
         var db = CreateDb();
-        var controller = new AuthController(db, CreateConfig());
+        var controller = CreateController(db);
         var request = new RegisterRequest
         {
             Email = "duplicate@example.com",
@@ -68,7 +71,7 @@ public class RegisterTests
     public async Task Register_EmailStoredAsLowercase()
     {
         var db = CreateDb();
-        var controller = new AuthController(db, CreateConfig());
+        var controller = CreateController(db);
 
         await controller.Register(new RegisterRequest
         {
@@ -86,7 +89,7 @@ public class RegisterTests
     public async Task Register_PasswordIsHashed()
     {
         var db = CreateDb();
-        var controller = new AuthController(db, CreateConfig());
+        var controller = CreateController(db);
 
         await controller.Register(new RegisterRequest
         {
@@ -105,7 +108,7 @@ public class RegisterTests
     public async Task Register_UserSavedToDatabase()
     {
         var db = CreateDb();
-        var controller = new AuthController(db, CreateConfig());
+        var controller = CreateController(db);
 
         await controller.Register(new RegisterRequest
         {

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Models.Auth;
+using UsBankSystem.Api.Services;
 using UsBankSystem.Infrastructure.Persistence;
 
 namespace UsBankSystem.Tests.Auth;
@@ -25,10 +26,12 @@ public class LoginTests
             })
             .Build();
 
+    private AuthController CreateController(AppDbContext db) =>
+        new(new AuthService(db, CreateConfig()));
+
     private async Task<AuthController> CreateControllerWithUser(AppDbContext db, string email = "test@example.com", string password = "Password123!")
     {
-        var config = CreateConfig();
-        var controller = new AuthController(db, config);
+        var controller = CreateController(db);
         await controller.Register(new RegisterRequest
         {
             Email = email,
@@ -67,8 +70,7 @@ public class LoginTests
             Password = "WrongPassword!"
         });
 
-        var unauthorized = Assert.IsType<UnauthorizedObjectResult>(result);
-        Assert.Equal(401, unauthorized.StatusCode);
+        Assert.IsType<UnauthorizedObjectResult>(result);
     }
 
     [Fact]
