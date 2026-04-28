@@ -1,8 +1,8 @@
 # Frontend — US Bank System
 
-> **Placeholder** — frontend zostanie zainicjowany w zadaniu US-35 przez `npm create vite@latest`.
+React + Vite + TypeScript SPA dla US Bank System.
 
-## Planowany stack
+## Stack
 
 - React 18
 - Vite
@@ -10,26 +10,15 @@
 - React Router
 - Axios
 
-## Planowana struktura (po inicjalizacji)
+## Uruchomienie
 
-```
-frontend/
-├── src/
-│   ├── pages/
-│   │   ├── LoginPage.tsx
-│   │   ├── DashboardPage.tsx
-│   │   ├── TransferPage.tsx
-│   │   └── BlikPage.tsx
-│   ├── components/
-│   ├── api/
-│   │   └── client.ts        # axios instance z JWT interceptorem
-│   └── main.tsx
-├── index.html
-├── vite.config.ts
-└── package.json
+Skopiuj `.env.example` i uzupełnij:
+
+```bash
+cp .env.example .env
 ```
 
-## Uruchomienie (po inicjalizacji)
+Uruchom aplikację:
 
 ```bash
 cd frontend
@@ -38,3 +27,18 @@ npm run dev
 ```
 
 Aplikacja dostępna pod `http://localhost:5173` (dev) lub `http://localhost:3000` (Docker/nginx).
+
+## Struktura
+
+```
+frontend/
+├── src/
+│   ├── pages/
+│   ├── components/
+│   ├── api/
+│   │   └── client.ts
+│   └── main.tsx
+├── .env.example
+├── index.html
+└── vite.config.ts
+```
