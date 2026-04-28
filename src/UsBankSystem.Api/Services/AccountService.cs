@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Core.Domain.Accounts;
-using UsBankSystem.Core.Domain.Accounts;
 using UsBankSystem.Core.Domain.Common;
 using Account = UsBankSystem.Core.Entities.Account;
 using UsBankSystem.Infrastructure.Persistence;
@@ -27,7 +26,7 @@ public class AccountService(AppDbContext db)
         {
             Id = Guid.NewGuid(),
             UserId = userId,
-            AccountNumber = GenerateAccountNumber(),
+            AccountNumber = await GenerateAccountNumberAsync(db),
             Type = request.Type,
             Currency = request.Currency.ToUpperInvariant(),
             Balance = 0,
@@ -51,12 +50,18 @@ public class AccountService(AppDbContext db)
         });
     }
 
-    private static string GenerateAccountNumber()
+    private static async Task<string> GenerateAccountNumberAsync(AppDbContext db)
     {
-        var digits = new char[16];
-        var rng = Random.Shared;
-        for (var i = 0; i < digits.Length; i++)
-            digits[i] = (char)('0' + rng.Next(0, 10));
-        return new string(digits);
+        string accountNumber;
+        do
+        {
+            var digits = new char[16];
+            for (var i = 0; i < digits.Length; i++)
+                digits[i] = (char)('0' + Random.Shared.Next(0, 10));
+            accountNumber = new string(digits);
+        }
+        while (await db.Accounts.AnyAsync(a => a.AccountNumber == accountNumber));
+
+        return accountNumber;
     }
 }
