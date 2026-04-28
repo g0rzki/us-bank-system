@@ -49,6 +49,28 @@ public class AccountService(AppDbContext db)
             CreatedAt = account.CreatedAt
         });
     }
+    
+    public async Task<(bool Success, string? Error, int StatusCode, AccountResponse? Result)> GetByIdAsync(Guid userId, Guid accountId)
+    {
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId);
+
+        if (account is null)
+            return (false, "Account not found", 404, null);
+
+        if (account.UserId != userId)
+            return (false, "Access denied", 403, null);
+
+        return (true, null, 200, new AccountResponse
+        {
+            Id = account.Id,
+            AccountNumber = account.AccountNumber,
+            Type = account.Type,
+            Balance = account.Balance,
+            Currency = account.Currency,
+            Status = account.Status,
+            CreatedAt = account.CreatedAt
+        });
+    }
 
     private static async Task<string> GenerateAccountNumberAsync(AppDbContext db)
     {
