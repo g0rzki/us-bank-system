@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddScoped<UsBankSystem.Api.Services.AuthService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.AccountService>();
+builder.Services.AddScoped<UsBankSystem.Api.Services.TransferService>();
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()

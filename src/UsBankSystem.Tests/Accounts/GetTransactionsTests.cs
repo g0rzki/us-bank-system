@@ -8,6 +8,7 @@ using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
+using UsBankSystem.Core.Domain.Transactions;
 using UsBankSystem.Core.Entities;
 using UsBankSystem.Infrastructure.Persistence;
 
@@ -69,8 +70,8 @@ public class GetTransactionsTests
             Id = Guid.NewGuid(),
             AccountId = accountId,
             Amount = i * 10m,
-            Type = "credit",
-            Status = "completed",
+            Type = TransactionType.Credit,
+            Status = TransactionStatus.Completed,
             Description = $"Transaction {i}",
             CreatedAt = DateTime.UtcNow.AddMinutes(-i)
         });
