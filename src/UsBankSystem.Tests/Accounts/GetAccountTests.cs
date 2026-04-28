@@ -8,6 +8,8 @@ using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
+using UsBankSystem.Core.Domain.Accounts;
+using UsBankSystem.Core.Domain.Common;
 using UsBankSystem.Infrastructure.Persistence;
 
 namespace UsBankSystem.Tests.Accounts;
@@ -80,8 +82,8 @@ public class GetAccountTests
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AccountResponse>(ok.Value);
         Assert.Equal(accountId, response.Id);
-        Assert.Equal("checking", response.Type);
-        Assert.Equal("USD", response.Currency);
+        Assert.Equal(AccountType.Checking, response.Type);
+        Assert.Equal(CurrencyCode.USD, response.Currency);
     }
 
     [Fact]

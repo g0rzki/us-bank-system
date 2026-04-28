@@ -8,6 +8,7 @@ using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
+using UsBankSystem.Core.Domain.Common;
 using UsBankSystem.Infrastructure.Persistence;
 
 namespace UsBankSystem.Tests.Accounts;
@@ -83,7 +84,7 @@ public class GetBalanceTests
         Assert.Equal(0, response.Balance);
         Assert.Equal(0, response.ReservedBalance);
         Assert.Equal(0, response.AvailableBalance);
-        Assert.Equal("USD", response.Currency);
+        Assert.Equal(CurrencyCode.USD, response.Currency);
     }
 
     [Fact]
