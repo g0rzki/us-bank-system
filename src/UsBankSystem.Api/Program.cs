@@ -9,6 +9,12 @@ using UsBankSystem.Infrastructure.Persistence;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
+    p.WithOrigins(
+        builder.Configuration["Cors:Origin"] ?? "http://localhost:5173"
+    )
+    .AllowAnyHeader()
+    .AllowAnyMethod()));
 builder.Services.AddScoped<UsBankSystem.Api.Services.AuthService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.AccountService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.TransferService>();
@@ -60,6 +66,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
+app.UseCors();
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
