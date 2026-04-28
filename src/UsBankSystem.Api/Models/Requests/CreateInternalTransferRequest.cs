@@ -5,6 +5,9 @@ namespace UsBankSystem.Api.Models.Requests;
 public class CreateInternalTransferRequest
 {
     [Required]
+    public Guid FromAccountId { get; set; }
+    
+    [Required]
     public Guid ToAccountId { get; set; }
 
     [Required]

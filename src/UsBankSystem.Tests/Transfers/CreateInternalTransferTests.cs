@@ -89,6 +89,7 @@ public class CreateInternalTransferTests
         var controller = CreateController(db, userId);
         var result = await controller.CreateInternal(new CreateInternalTransferRequest
         {
+            FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 100m,
             Description = "Test transfer"
@@ -104,6 +105,7 @@ public class CreateInternalTransferTests
         var controller = CreateController(db, userId);
         await controller.CreateInternal(new CreateInternalTransferRequest
         {
+            FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 100m
         });
@@ -116,10 +118,11 @@ public class CreateInternalTransferTests
     [Fact]
     public async Task CreateInternal_TransferStatusCompleted()
     {
-        var (db, userId, _, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId);
         await controller.CreateInternal(new CreateInternalTransferRequest
         {
+            FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 100m
         });
@@ -130,10 +133,11 @@ public class CreateInternalTransferTests
     [Fact]
     public async Task CreateInternal_TwoTransactionsCreated()
     {
-        var (db, userId, _, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId);
         await controller.CreateInternal(new CreateInternalTransferRequest
         {
+            FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 100m
         });
@@ -143,10 +147,11 @@ public class CreateInternalTransferTests
     [Fact]
     public async Task CreateInternal_InsufficientFunds_Returns400()
     {
-        var (db, userId, _, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId);
         var result = await controller.CreateInternal(new CreateInternalTransferRequest
         {
+            FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 9999m
         });
@@ -161,6 +166,7 @@ public class CreateInternalTransferTests
         var controller = CreateController(db, userId);
         var result = await controller.CreateInternal(new CreateInternalTransferRequest
         {
+            FromAccountId = fromAccountId,
             ToAccountId = fromAccountId,
             Amount = 100m
         });
@@ -170,11 +176,12 @@ public class CreateInternalTransferTests
     [Fact]
     public async Task CreateInternal_InvalidCurrency_Returns400()
     {
-        var (db, userId, _, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId);
         var result = await controller.CreateInternal(new CreateInternalTransferRequest
         {
-            ToAccountId = toAccountId,
+            FromAccountId = fromAccountId,
+            ToAccountId = fromAccountId,
             Amount = 100m,
             Currency = "EUR"
         });

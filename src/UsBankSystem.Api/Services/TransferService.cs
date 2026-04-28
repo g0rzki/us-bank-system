@@ -17,7 +17,7 @@ public class TransferService(AppDbContext db)
         if (!CurrencyCode.IsValid(request.Currency))
             return (false, $"Unsupported currency '{request.Currency}'", 400, null);
 
-        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.UserId == userId && a.Status == AccountStatus.Active);
+        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active);
         if (fromAccount is null)
             return (false, "Source account not found or inactive", 404, null);
 
