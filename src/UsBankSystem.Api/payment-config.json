@@ -1,0 +1,17 @@
+{
+  "PaymentSessions": {
+    "Ach": {
+      "BatchWindowMinutes": 1,
+      "CutoffHour": 23
+    },
+    "FedNow": {
+      "TimeoutSeconds": 10
+    },
+    "Rtp": {
+      "TimeoutSeconds": 10
+    },
+    "Swift": {
+      "TimeoutSeconds": 30
+    }
+  }
+}
