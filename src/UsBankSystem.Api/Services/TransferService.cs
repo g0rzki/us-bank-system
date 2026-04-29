@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using UsBankSystem.Api.Configuration;
+using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Core.Domain.Common;
@@ -10,7 +13,7 @@ using Transfer = UsBankSystem.Core.Entities.Transfer;
 
 namespace UsBankSystem.Api.Services;
 
-public class TransferService(AppDbContext db)
+public class TransferService(AppDbContext db, AchGateway achGateway, IOptions<PaymentSessionConfig> paymentConfig)
 {
     public async Task<(bool Success, string? Error, int StatusCode, TransferResponse? Result)> CreateInternalAsync(Guid userId, CreateInternalTransferRequest request)
     {
@@ -117,6 +120,99 @@ public class TransferService(AppDbContext db)
             RequiresApproval = transfer.RequiresApproval
         });
     }
+    
+    public async Task<(bool Success, string? Error, int StatusCode, TransferResponse? Result)> CreateAchAsync(Guid userId, CreateAchTransferRequest request)
+    {
+        if (!CurrencyCode.IsValid(request.Currency))
+            return (false, $"Unsupported currency '{request.Currency}'", 400, null);
+
+        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active);
+        if (fromAccount is null)
+            return (false, "Source account not found or inactive", 404, null);
+
+        var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
+        if (availableBalance < request.Amount)
+            return (false, "Insufficient funds", 400, null);
+
+        // Sprawdź czy jesteśmy w oknie batch ACH
+        var config = paymentConfig.Value.Ach;
+        var now = DateTime.UtcNow;
+        var cutoff = new DateTime(now.Year, now.Month, now.Day, config.CutoffHour, 0, 0, DateTimeKind.Utc);
+        var nextBatch = now > cutoff ? cutoff.AddDays(1) : cutoff;
+
+        // Zablokuj środki
+        fromAccount.ReservedBalance += request.Amount;
+
+        var transfer = new Transfer
+        {
+            Id = Guid.NewGuid(),
+            FromAccountId = fromAccount.Id,
+            ToAccountId = null,
+            Amount = request.Amount,
+            Currency = request.Currency.ToUpperInvariant(),
+            Channel = TransferChannel.Ach,
+            Status = TransferStatus.Pending,
+            Description = request.Description,
+            RequiresApproval = false,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        db.Transfers.Add(transfer);
+
+        db.Transactions.Add(new Transaction
+        {
+            Id = Guid.NewGuid(),
+            AccountId = fromAccount.Id,
+            Amount = request.Amount,
+            Type = TransactionType.Debit,
+            Status = TransactionStatus.Pending,
+            Description = request.Description ?? "ACH transfer",
+            ReferenceId = transfer.Id.ToString(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
+        // Wyślij do modułu ACH
+        var gatewayResult = await achGateway.SendAsync(new(
+            TransferId: transfer.Id,
+            Amount: transfer.Amount,
+            Currency: transfer.Currency,
+            Description: transfer.Description,
+            Metadata: new Dictionary<string, string>
+            {
+                ["toRoutingNumber"] = request.ToRoutingNumber,
+                ["toAccountNumber"] = request.ToAccountNumber
+            }
+        ));
+
+        if (!gatewayResult.Success)
+        {
+            transfer.Status = TransferStatus.Failed;
+            fromAccount.ReservedBalance -= request.Amount;
+            await db.SaveChangesAsync();
+            return (false, gatewayResult.Error ?? "ACH gateway error", 400, null);
+        }
+
+        transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
+        await db.SaveChangesAsync();
+
+        return (true, null, 201, new TransferResponse
+        {
+            Id = transfer.Id,
+            FromAccountId = transfer.FromAccountId,
+            ToAccountId = transfer.ToAccountId,
+            Amount = transfer.Amount,
+            Currency = transfer.Currency,
+            Channel = transfer.Channel,
+            Status = transfer.Status,
+            Description = transfer.Description,
+            CreatedAt = transfer.CreatedAt,
+            CompletedAt = transfer.CompletedAt,
+            RequiresApproval = transfer.RequiresApproval
+        });
+    }
+    
     
     private async Task<decimal?> GetDailyTransferLimitAsync(Guid accountId)
     {
