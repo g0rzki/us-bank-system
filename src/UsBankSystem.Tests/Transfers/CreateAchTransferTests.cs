@@ -50,7 +50,11 @@ public class CreateAchTransferTests
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode gatewayStatus = HttpStatusCode.OK)
     {
         var gateway = CreateGateway(gatewayStatus, """{"referenceId":"ACH-REF-001"}""");
-        var service = new TransferService(db, gateway, CreatePaymentConfig());
+		var rtpGateway = new RtpGateway(
+        	new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+            	{ BaseAddress = new Uri("http://localhost:6002") },
+        	NullLogger<RtpGateway>.Instance);
+        var service = new TransferService(db, gateway, rtpGateway, CreatePaymentConfig());
         var controller = new TransfersController(service);
         controller.ControllerContext = new ControllerContext
         {
