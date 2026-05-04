@@ -1,8 +1,9 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { register } from '../../api/auth';
-import { validateRegisterForm, RegisterErrors } from '../../utils/validators';
-import { getApiErrorStatus } from '../../utils/apiError';
+import { validateRegisterForm } from '../../utils/validators';
+import type { RegisterErrors } from '../../utils/validators';
+import { getApiErrorStatus, isNetworkError } from '../../utils/apiError';
 import FormField from '../../components/FormField';
 import Button from '../../components/Button';
 import ErrorBanner from '../../components/ErrorBanner';
@@ -23,7 +24,7 @@ export default function RegisterPage() {
     async function handleSubmit(e: FormEvent) {
         e.preventDefault();
         const errs = validateRegisterForm(firstName, lastName, email, password, confirmPassword);
-        if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+        if (Object.values(errs).some(Boolean)) { setErrors(errs); return; }
 
         setLoading(true);
         setErrors({});
@@ -32,7 +33,7 @@ export default function RegisterPage() {
             navigate('/login');
         } catch (err: unknown) {
             const status = getApiErrorStatus(err);
-            setErrors({ general: status === 409 ? 'An account with this email already exists' : 'Something went wrong. Try again.' });
+            setErrors({ general: isNetworkError(err) ? 'Unable to connect to server. Try again later.' : status === 409 ? 'An account with this email already exists' : 'Something went wrong. Try again.' });
         } finally {
             setLoading(false);
         }

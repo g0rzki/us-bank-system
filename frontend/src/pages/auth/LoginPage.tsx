@@ -1,8 +1,9 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { login } from '../../api/auth';
-import { validateLoginForm, LoginErrors } from '../../utils/validators';
-import { getApiErrorStatus } from '../../utils/apiError';
+import { validateLoginForm } from '../../utils/validators';
+import type { LoginErrors } from '../../utils/validators';
+import { getApiErrorStatus, isNetworkError } from '../../utils/apiError';
 import FormField from '../../components/FormField';
 import Button from '../../components/Button';
 import ErrorBanner from '../../components/ErrorBanner';
@@ -20,7 +21,7 @@ export default function LoginPage() {
     async function handleSubmit(e: FormEvent) {
         e.preventDefault();
         const errs = validateLoginForm(email, password);
-        if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+        if (Object.values(errs).some(Boolean)) { setErrors(errs); return; }
 
         setLoading(true);
         setErrors({});
@@ -28,8 +29,9 @@ export default function LoginPage() {
             await login({ email, password });
             navigate('/dashboard');
         } catch (err: unknown) {
+            console.log('login error:', err);
             const status = getApiErrorStatus(err);
-            setErrors({ general: status === 401 ? 'Invalid email or password' : 'Something went wrong. Try again.' });
+            setErrors({ general: isNetworkError(err) ? 'Unable to connect to server. Try again later.' : status === 401 ? 'Invalid email or password' : 'Something went wrong. Try again.' });
         } finally {
             setLoading(false);
         }
