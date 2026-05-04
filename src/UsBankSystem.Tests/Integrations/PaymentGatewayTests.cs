@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using UsBankSystem.Api.Integrations;
 using UsBankSystem.Core.Domain;
 using UsBankSystem.Core.Domain.Transfers;
+using UsBankSystem.Tests.Helpers;
 
 namespace UsBankSystem.Tests.Integrations;
 
@@ -52,21 +53,9 @@ public class PaymentGatewayTests
     }
 
     [Fact]
-    public async Task AchGateway_Channel_IsAch()
+    public void AchGateway_Channel_IsAch()
     {
         var gateway = CreateGateway(HttpStatusCode.OK, "{}");
         Assert.Equal(TransferChannel.Ach, gateway.Channel);
-    }
-}
-
-public class MockHttpMessageHandler(HttpStatusCode statusCode, string responseBody) : HttpMessageHandler
-{
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        var response = new HttpResponseMessage(statusCode)
-        {
-            Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
-        };
-        return Task.FromResult(response);
     }
 }
