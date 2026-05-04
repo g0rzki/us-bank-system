@@ -209,7 +209,8 @@ public class TransferService(AppDbContext db, AchGateway achGateway, IOptions<Pa
             Description = transfer.Description,
             CreatedAt = transfer.CreatedAt,
             CompletedAt = transfer.CompletedAt,
-            RequiresApproval = transfer.RequiresApproval
+            RequiresApproval = transfer.RequiresApproval,
+            EstimatedSettlement = nextBatch
         });
     }
     
