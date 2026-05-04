@@ -15,6 +15,7 @@ using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
 using UsBankSystem.Infrastructure.Persistence;
+using UsBankSystem.Tests.Helpers;
 
 namespace UsBankSystem.Tests.Transfers;
 

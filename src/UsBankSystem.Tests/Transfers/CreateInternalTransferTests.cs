@@ -1,9 +1,14 @@
+using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Controllers;
+using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
@@ -11,6 +16,7 @@ using UsBankSystem.Api.Services;
 using UsBankSystem.Core.Domain.Common;
 using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Infrastructure.Persistence;
+using UsBankSystem.Tests.Helpers;
 
 namespace UsBankSystem.Tests.Transfers;
 
@@ -30,20 +36,28 @@ public class CreateInternalTransferTests
             .Build();
 
     private TransfersController CreateController(AppDbContext db, Guid userId)
-    {
-        var controller = new TransfersController(new TransferService(db));
-        controller.ControllerContext = new ControllerContext
-        {
-            HttpContext = new DefaultHttpContext
-            {
-                User = new ClaimsPrincipal(new ClaimsIdentity(new[]
-                {
-                    new Claim(ClaimTypes.NameIdentifier, userId.ToString())
-                }))
-            }
-        };
-        return controller;
-    }
+	{
+    	var handler = new MockHttpMessageHandler(HttpStatusCode.OK, """{"referenceId":"REF-001"}""");
+    	var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:6001") };
+    	var achGateway = new AchGateway(httpClient, NullLogger<AchGateway>.Instance);
+    	var paymentConfig = Options.Create(new PaymentSessionConfig
+    	{
+        	Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 }
+    	});
+    	var service = new TransferService(db, achGateway, paymentConfig);
+    	var controller = new TransfersController(service);
+    	controller.ControllerContext = new ControllerContext
+    	{
+        	HttpContext = new DefaultHttpContext
+        	{
+            	User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+            	{
+                	new Claim(ClaimTypes.NameIdentifier, userId.ToString())
+            	}))
+        	}
+    	};
+    	return controller;
+	}
 
     private async Task<(AppDbContext db, Guid userId, Guid fromAccountId, Guid toAccountId)> Setup()
     {
