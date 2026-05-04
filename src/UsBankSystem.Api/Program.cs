@@ -12,6 +12,12 @@ builder.Services.AddControllers();
 builder.Services.AddScoped<UsBankSystem.Api.Services.AuthService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.AccountService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.TransferService>();
+// CORS
+builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
+    p.WithOrigins(builder.Configuration["Cors:Origin"] ?? "http://localhost:5173")
+     .AllowAnyHeader()
+     .AllowAnyMethod()));
+
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
@@ -60,6 +66,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
+app.UseCors();
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
