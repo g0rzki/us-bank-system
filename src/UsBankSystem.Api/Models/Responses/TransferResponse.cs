@@ -13,4 +13,5 @@ public class TransferResponse
     public DateTime CreatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public bool RequiresApproval { get; set; }
+    public DateTime? EstimatedSettlement { get; set; }
 }

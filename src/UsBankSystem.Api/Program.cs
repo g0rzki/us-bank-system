@@ -2,7 +2,9 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Extensions;
+using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Middleware;
 using UsBankSystem.Infrastructure.Persistence;
 
@@ -17,6 +19,21 @@ builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
     p.WithOrigins(builder.Configuration["Cors:Origin"] ?? "http://localhost:5173")
      .AllowAnyHeader()
      .AllowAnyMethod()));
+
+// Payment config
+builder.Configuration.AddJsonFile("payment-config.json", optional: false, reloadOnChange: true);
+builder.Services.Configure<PaymentSessionConfig>(
+    builder.Configuration.GetSection("PaymentSessions"));
+
+// Payment gateways
+builder.Services.AddHttpClient<AchGateway>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:AchUrl"] ?? "http://localhost:6001"));
+builder.Services.AddHttpClient<RtpGateway>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpUrl"] ?? "http://localhost:6002"));
+builder.Services.AddHttpClient<FedNowGateway>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:FedNowUrl"] ?? "http://localhost:6003"));
+builder.Services.AddHttpClient<SwiftGateway>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:SwiftUrl"] ?? "http://localhost:6004"));
 
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
