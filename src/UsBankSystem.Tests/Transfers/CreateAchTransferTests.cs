@@ -37,7 +37,9 @@ public class CreateAchTransferTests
     private IOptions<PaymentSessionConfig> CreatePaymentConfig() =>
         Options.Create(new PaymentSessionConfig
         {
-            Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 }
+            Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
+			Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
+        	FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
         });
 
     private static AchGateway CreateGateway(HttpStatusCode statusCode, string body)
@@ -54,7 +56,11 @@ public class CreateAchTransferTests
         	new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
             	{ BaseAddress = new Uri("http://localhost:6002") },
         	NullLogger<RtpGateway>.Instance);
-        var service = new TransferService(db, gateway, rtpGateway, CreatePaymentConfig());
+		var fedNowGateway = new FedNowGateway(
+        	new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+            	{ BaseAddress = new Uri("http://localhost:6003") },
+        	NullLogger<FedNowGateway>.Instance);
+        var service = new TransferService(db, gateway, rtpGateway, fedNowGateway, CreatePaymentConfig());
         var controller = new TransfersController(service);
         controller.ControllerContext = new ControllerContext
         {

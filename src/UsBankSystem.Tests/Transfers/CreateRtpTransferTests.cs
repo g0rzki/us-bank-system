@@ -37,7 +37,8 @@ public class CreateRtpTransferTests
         Options.Create(new PaymentSessionConfig
         {
             Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
-            Rtp = new TimeoutConfig { TimeoutSeconds = 10 }
+            Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
+            FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
         });
 
     private static AchGateway CreateAchGateway() =>
@@ -52,7 +53,11 @@ public class CreateRtpTransferTests
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode rtpStatus = HttpStatusCode.OK)
     {
-        var service = new TransferService(db, CreateAchGateway(), CreateRtpGateway(rtpStatus), CreatePaymentConfig());
+        var fedNowGateway = new FedNowGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+                { BaseAddress = new Uri("http://localhost:6003") },
+            NullLogger<FedNowGateway>.Instance);
+        var service = new TransferService(db, CreateAchGateway(), CreateRtpGateway(rtpStatus), fedNowGateway,CreatePaymentConfig());
         var controller = new TransfersController(service);
         controller.ControllerContext = new ControllerContext
         {
