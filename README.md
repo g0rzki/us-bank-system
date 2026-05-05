@@ -182,6 +182,7 @@ POSTGRES_USER=twoj_user     # dowolna nazwa użytkownika bazy
 POSTGRES_PASSWORD=twoje_haslo
 POSTGRES_PORT=5433          # port na hoście (5433 jeśli lokalny postgres zajmuje 5432)
 JWT_SECRET=min_32_znaki     # dowolny ciąg min. 32 znaków
+CORS_ORIGIN=http://localhost:3000
 INTEGRATIONS_ACH_URL=http://localhost:6001
 INTEGRATIONS_RTP_URL=http://localhost:6002
 INTEGRATIONS_FEDNOW_URL=http://localhost:6003
@@ -219,12 +220,12 @@ Pierwsze uruchomienie pobiera obrazy i buduje kontenery — może potrwać kilka
 
 Aplikacja dostępna pod:
 
-| Serwis | URL |
-|---|---|
-| Frontend | http://localhost:3000 |
-| API | http://localhost:5000 |
-| Swagger UI | http://localhost:5000/swagger |
-| Health check | http://localhost:5000/health |
+| Serwis | URL                           |
+|---|-------------------------------|
+| Frontend | http://localhost:3000         |
+| API | http://localhost:5100         |
+| Swagger UI | http://localhost:5100/swagger |
+| Health check | http://localhost:5100/health  |
 
 ### Zatrzymanie aplikacji
 
