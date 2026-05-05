@@ -1,0 +1,22 @@
+.auth-btn {
+    width: 100%;
+    height: var(--btn-height);
+    background: var(--color-primary);
+    color: var(--color-primary-text);
+    border: none;
+    border-radius: var(--radius-btn);
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: var(--spacing-xs);
+    transition: background 0.15s;
+}
+
+.auth-btn:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+}
+
+.auth-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}

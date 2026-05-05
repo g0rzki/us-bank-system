@@ -4,12 +4,15 @@ services:
       context: .
       dockerfile: src/UsBankSystem.Api/Dockerfile
     ports:
-      - "5000:8080"
+      - "5100:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Default=Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       - Jwt__Secret=${JWT_SECRET}
+      - Cors__Origin=${CORS_ORIGIN}
       - Integrations__AchUrl=${INTEGRATIONS_ACH_URL}
+      - Integrations__RtpUrl=${INTEGRATIONS_RTP_URL}
+      - Integrations__FedNowUrl=${INTEGRATIONS_FEDNOW_URL}
       - Integrations__SwiftUrl=${INTEGRATIONS_SWIFT_URL}
       - Integrations__CardsUrl=${INTEGRATIONS_CARDS_URL}
       - Integrations__BlikUrl=${INTEGRATIONS_BLIK_URL}
