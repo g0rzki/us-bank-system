@@ -12,6 +12,15 @@ namespace UsBankSystem.Api.Controllers;
 [Tags("Transfers")]
 public class TransfersController(TransferService transferService, IConfiguration configuration) : ControllerBase
 {
+    [HttpGet]
+    [ProducesResponseType(typeof(List<TransferResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetAll()
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        return Ok(await transferService.GetAllAsync(userId));
+    }
+
     [HttpPost("internal")]
     [ProducesResponseType(typeof(TransferResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

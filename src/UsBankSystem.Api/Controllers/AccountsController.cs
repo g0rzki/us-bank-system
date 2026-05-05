@@ -11,6 +11,15 @@ namespace UsBankSystem.Api.Controllers;
 [Tags("Accounts")]
 public class AccountsController(AccountService accountService) : ControllerBase
 {
+    [HttpGet]
+    [ProducesResponseType(typeof(List<AccountResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetAll()
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        return Ok(await accountService.GetAllAsync(userId));
+    }
+
     [HttpPost]
     [ProducesResponseType(typeof(AccountResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -20,16 +29,6 @@ public class AccountsController(AccountService accountService) : ControllerBase
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
         var result = await accountService.CreateAsync(userId, request);
         return StatusCode(StatusCodes.Status201Created, result);
-    }
-
-    [HttpGet]
-    [ProducesResponseType(typeof(List<AccountResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> GetAll()
-    {
-        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
-        var result = await accountService.GetAllAsync(userId);
-        return Ok(result);
     }
 
     [HttpGet("{id:guid}")]
