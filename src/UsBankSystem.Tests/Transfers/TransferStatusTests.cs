@@ -133,7 +133,7 @@ public class TransferStatusTests
     }
 
     [Fact]
-    public async Task GetStatus_OtherUsersTransfer_Returns403()
+    public async Task GetStatus_OtherUsersTransfer_Throws()
     {
         var (db, userId, fromAccountId, _) = await Setup();
         var controller = CreateController(db, userId);
@@ -141,20 +141,16 @@ public class TransferStatusTests
         var transfer = await db.Transfers.FirstAsync();
 
         var otherController = CreateController(db, Guid.NewGuid());
-        var result = await otherController.GetStatus(transfer.Id);
-
-        Assert.IsType<ForbidResult>(result);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => otherController.GetStatus(transfer.Id));
     }
 
     [Fact]
-    public async Task GetStatus_NotFound_Returns404()
+    public async Task GetStatus_NotFound_Throws()
     {
         var (db, userId, _, _) = await Setup();
         var controller = CreateController(db, userId);
 
-        var result = await controller.GetStatus(Guid.NewGuid());
-
-        Assert.IsType<NotFoundObjectResult>(result);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => controller.GetStatus(Guid.NewGuid()));
     }
 
     [Fact]

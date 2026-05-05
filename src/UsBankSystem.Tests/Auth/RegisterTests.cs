@@ -61,7 +61,7 @@ public class RegisterTests
         };
 
         await controller.Register(request);
-        await Assert.ThrowsAsync<ArgumentException>(() => controller.Register(request));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => controller.Register(request));
     }
 
     [Fact]

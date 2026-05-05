@@ -167,31 +167,29 @@ public class CreateRtpTransferTests
     }
 
     [Fact]
-    public async Task CreateRtp_InsufficientFunds_Returns400()
+    public async Task CreateRtp_InsufficientFunds_Throws()
     {
         var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.CreateRtp(new CreateRtpTransferRequest
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateRtp(new CreateRtpTransferRequest
         {
             FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 9999m
-        });
-        Assert.IsType<BadRequestObjectResult>(result);
+        }));
     }
 
     [Fact]
-    public async Task CreateRtp_GatewayFailure_Returns400AndReleasesReservation()
+    public async Task CreateRtp_GatewayFailure_ThrowsAndReleasesReservation()
     {
         var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId, HttpStatusCode.BadRequest);
-        var result = await controller.CreateRtp(new CreateRtpTransferRequest
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateRtp(new CreateRtpTransferRequest
         {
             FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 100m
-        });
-        Assert.IsType<BadRequestObjectResult>(result);
+        }));
         var account = await db.Accounts.FindAsync(fromAccountId);
         Assert.Equal(0m, account!.ReservedBalance);
     }

@@ -16,7 +16,7 @@ public class AuthService(AppDbContext db, IConfiguration config)
     {
         var emailTaken = await db.Users.AnyAsync(u => u.Email == request.Email.ToLowerInvariant());
         if (emailTaken)
-            throw new ArgumentException("Email is already taken");
+            throw new InvalidOperationException("Email is already taken");
 
         var user = new User
         {

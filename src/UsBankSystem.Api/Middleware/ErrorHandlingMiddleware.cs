@@ -25,6 +25,7 @@ public class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandling
         {
             KeyNotFoundException => (HttpStatusCode.NotFound, "Resource not found"),
             UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "Unauthorized"),
+            InvalidOperationException => (HttpStatusCode.Conflict, "Conflict"),
             ArgumentException => (HttpStatusCode.BadRequest, "Bad request"),
             _ => (HttpStatusCode.InternalServerError, "An unexpected error occurred")
         };
