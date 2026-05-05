@@ -9,46 +9,43 @@ using UsBankSystem.Core.Domain.Transactions;
 using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Core.Entities;
 using UsBankSystem.Infrastructure.Persistence;
-using Transfer = UsBankSystem.Core.Entities.Transfer; 
+using Transfer = UsBankSystem.Core.Entities.Transfer;
 
 namespace UsBankSystem.Api.Services;
 
 public class TransferService(
-	AppDbContext db, 
+	AppDbContext db,
 	AchGateway achGateway,
 	RtpGateway rtpGateway,
 	FedNowGateway fedNowGateway,
 	IOptions<PaymentSessionConfig> paymentConfig)
 {
-    public async Task<(bool Success, string? Error, int StatusCode, TransferResponse? Result)> CreateInternalAsync(Guid userId, CreateInternalTransferRequest request)
+    public async Task<TransferResponse> CreateInternalAsync(Guid userId, CreateInternalTransferRequest request)
     {
         if (!CurrencyCode.IsValid(request.Currency))
-            return (false, $"Unsupported currency '{request.Currency}'", 400, null);
+            throw new ArgumentException($"Unsupported currency '{request.Currency}'");
 
-        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active);
-        if (fromAccount is null)
-            return (false, "Source account not found or inactive", 404, null);
+        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
+            ?? throw new KeyNotFoundException("Source account not found or inactive");
 
-        var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active);
-        if (toAccount is null)
-            return (false, "Destination account not found or inactive", 404, null);
+        var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active)
+            ?? throw new KeyNotFoundException("Destination account not found or inactive");
 
         if (fromAccount.Id == toAccount.Id)
-            return (false, "Cannot transfer to the same account", 400, null);
+            throw new ArgumentException("Cannot transfer to the same account");
 
         // Sprawdź czy konto źródłowe to konto junior
         var isJuniorAccount = false; // TODO: US-30 - sprawdzenie konta junior
-        // var isJuniorAccount = await db.Set<JuniorAccount>().AnyAsync(j => j.AccountId == fromAccount.Id);
 
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
-            return (false, "Insufficient funds", 400, null);
-        
+            throw new ArgumentException("Insufficient funds");
+
         // Sprawdź dzienny limit transferów
         var dailyLimit = await GetDailyTransferLimitAsync(fromAccount.Id);
         var todayTotal = await GetTodayTransferTotalAsync(fromAccount.Id);
         if (dailyLimit.HasValue && todayTotal + request.Amount > dailyLimit.Value)
-            return (false, $"Daily transfer limit exceeded. Limit: {dailyLimit}, used: {todayTotal}, requested: {request.Amount}", 400, null);
+            throw new ArgumentException($"Daily transfer limit exceeded. Limit: {dailyLimit}, used: {todayTotal}, requested: {request.Amount}");
 
         var requiresApproval = isJuniorAccount;
         var status = requiresApproval ? TransferStatus.PendingApproval : TransferStatus.Pending;
@@ -69,13 +66,11 @@ public class TransferService(
 
         if (!requiresApproval)
         {
-            // Wykonaj przelew natychmiast
             fromAccount.Balance -= request.Amount;
             toAccount.Balance += request.Amount;
             transfer.Status = TransferStatus.Completed;
             transfer.CompletedAt = DateTime.UtcNow;
 
-            // Zapisz transakcje
             db.Transactions.AddRange(
                 new Transaction
                 {
@@ -103,14 +98,13 @@ public class TransferService(
         }
         else
         {
-            // Zablokuj środki na koncie junior
             fromAccount.ReservedBalance += request.Amount;
         }
 
         db.Transfers.Add(transfer);
         await db.SaveChangesAsync();
 
-        return (true, null, 201, new TransferResponse
+        return new TransferResponse
         {
             Id = transfer.Id,
             FromAccountId = transfer.FromAccountId,
@@ -123,29 +117,26 @@ public class TransferService(
             CreatedAt = transfer.CreatedAt,
             CompletedAt = transfer.CompletedAt,
             RequiresApproval = transfer.RequiresApproval
-        });
+        };
     }
-    
-    public async Task<(bool Success, string? Error, int StatusCode, TransferResponse? Result)> CreateAchAsync(Guid userId, CreateAchTransferRequest request)
+
+    public async Task<TransferResponse> CreateAchAsync(Guid userId, CreateAchTransferRequest request)
     {
         if (!CurrencyCode.IsValid(request.Currency))
-            return (false, $"Unsupported currency '{request.Currency}'", 400, null);
+            throw new ArgumentException($"Unsupported currency '{request.Currency}'");
 
-        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active);
-        if (fromAccount is null)
-            return (false, "Source account not found or inactive", 404, null);
+        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
+            ?? throw new KeyNotFoundException("Source account not found or inactive");
 
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
-            return (false, "Insufficient funds", 400, null);
+            throw new ArgumentException("Insufficient funds");
 
-        // Sprawdź czy jesteśmy w oknie batch ACH
         var config = paymentConfig.Value.Ach;
         var now = DateTime.UtcNow;
         var cutoff = new DateTime(now.Year, now.Month, now.Day, config.CutoffHour, 0, 0, DateTimeKind.Utc);
         var nextBatch = now > cutoff ? cutoff.AddDays(1) : cutoff;
 
-        // Zablokuj środki
         fromAccount.ReservedBalance += request.Amount;
 
         var transfer = new Transfer
@@ -178,7 +169,6 @@ public class TransferService(
 
         await db.SaveChangesAsync();
 
-        // Wyślij do modułu ACH
         var gatewayResult = await achGateway.SendAsync(new(
             TransferId: transfer.Id,
             Amount: transfer.Amount,
@@ -196,13 +186,13 @@ public class TransferService(
             transfer.Status = TransferStatus.Failed;
             fromAccount.ReservedBalance -= request.Amount;
             await db.SaveChangesAsync();
-            return (false, gatewayResult.Error ?? "ACH gateway error", 400, null);
+            throw new ArgumentException(gatewayResult.Error ?? "ACH gateway error");
         }
 
         transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
         await db.SaveChangesAsync();
 
-        return (true, null, 201, new TransferResponse
+        return new TransferResponse
         {
             Id = transfer.Id,
             FromAccountId = transfer.FromAccountId,
@@ -216,32 +206,29 @@ public class TransferService(
             CompletedAt = transfer.CompletedAt,
             RequiresApproval = transfer.RequiresApproval,
             EstimatedSettlement = nextBatch
-        });
+        };
     }
-    
-	public async Task<(bool Success, string? Error, int StatusCode, TransferResponse? Result)> CreateRtpAsync(Guid userId, CreateRtpTransferRequest request)
+
+	public async Task<TransferResponse> CreateRtpAsync(Guid userId, CreateRtpTransferRequest request)
 	{
     	if (!CurrencyCode.IsValid(request.Currency))
-        	return (false, $"Unsupported currency '{request.Currency}'", 400, null);
+        	throw new ArgumentException($"Unsupported currency '{request.Currency}'");
 
-    	var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active);
-    	if (fromAccount is null)
-        	return (false, "Source account not found or inactive", 404, null);
+    	var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
+        	?? throw new KeyNotFoundException("Source account not found or inactive");
 
-    	var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active);
-    	if (toAccount is null)
-        	return (false, "Destination account not found or inactive", 404, null);
+    	var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active)
+        	?? throw new KeyNotFoundException("Destination account not found or inactive");
 
     	if (fromAccount.Id == toAccount.Id)
-        	return (false, "Cannot transfer to the same account", 400, null);
+        	throw new ArgumentException("Cannot transfer to the same account");
 
     	var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
     	if (availableBalance < request.Amount)
-        	return (false, "Insufficient funds", 400, null);
+        	throw new ArgumentException("Insufficient funds");
 
     	var timeout = paymentConfig.Value.Rtp.TimeoutSeconds;
 
-    	// Zablokuj środki
     	fromAccount.ReservedBalance += request.Amount;
 
     	var transfer = new Transfer
@@ -261,7 +248,6 @@ public class TransferService(
     	db.Transfers.Add(transfer);
     	await db.SaveChangesAsync();
 
-    	// Wyślij do modułu RTP z timeoutem
     	using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
     	var gatewayResult = await rtpGateway.SendAsync(new(
         	TransferId: transfer.Id,
@@ -279,10 +265,9 @@ public class TransferService(
         	transfer.Status = TransferStatus.Failed;
         	fromAccount.ReservedBalance -= request.Amount;
         	await db.SaveChangesAsync();
-        	return (false, gatewayResult.Error ?? "RTP gateway error", 400, null);
+        	throw new ArgumentException(gatewayResult.Error ?? "RTP gateway error");
     	}
 
-    	// RTP jest natychmiastowy — od razu rozlicz
     	fromAccount.Balance -= request.Amount;
     	fromAccount.ReservedBalance -= request.Amount;
     	toAccount.Balance += request.Amount;
@@ -317,7 +302,7 @@ public class TransferService(
 
     	await db.SaveChangesAsync();
 
-    	return (true, null, 201, new TransferResponse
+    	return new TransferResponse
     	{
         	Id = transfer.Id,
         	FromAccountId = transfer.FromAccountId,
@@ -330,32 +315,29 @@ public class TransferService(
         	CreatedAt = transfer.CreatedAt,
         	CompletedAt = transfer.CompletedAt,
         	RequiresApproval = transfer.RequiresApproval
-    	});
+    	};
 	}
 
-	public async Task<(bool Success, string? Error, int StatusCode, TransferResponse? Result)> CreateFedNowAsync(Guid userId, CreateFedNowTransferRequest request)
+	public async Task<TransferResponse> CreateFedNowAsync(Guid userId, CreateFedNowTransferRequest request)
 	{
     	if (!CurrencyCode.IsValid(request.Currency))
-        	return (false, $"Unsupported currency '{request.Currency}'", 400, null);
+        	throw new ArgumentException($"Unsupported currency '{request.Currency}'");
 
-    	var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active);
-    	if (fromAccount is null)
-        	return (false, "Source account not found or inactive", 404, null);
+    	var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
+        	?? throw new KeyNotFoundException("Source account not found or inactive");
 
-    	var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active);
-    	if (toAccount is null)
-        	return (false, "Destination account not found or inactive", 404, null);
+    	var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active)
+        	?? throw new KeyNotFoundException("Destination account not found or inactive");
 
     	if (fromAccount.Id == toAccount.Id)
-        	return (false, "Cannot transfer to the same account", 400, null);
+        	throw new ArgumentException("Cannot transfer to the same account");
 
     	var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
     	if (availableBalance < request.Amount)
-        	return (false, "Insufficient funds", 400, null);
+        	throw new ArgumentException("Insufficient funds");
 
     	var timeout = paymentConfig.Value.FedNow.TimeoutSeconds;
 
-    	// Zablokuj środki
     	fromAccount.ReservedBalance += request.Amount;
 
     	var transfer = new Transfer
@@ -375,7 +357,6 @@ public class TransferService(
     	db.Transfers.Add(transfer);
     	await db.SaveChangesAsync();
 
-    	// Wyślij do modułu FedNow z timeoutem
     	using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
     	var gatewayResult = await fedNowGateway.SendAsync(new(
         	TransferId: transfer.Id,
@@ -393,10 +374,9 @@ public class TransferService(
         	transfer.Status = TransferStatus.Failed;
         	fromAccount.ReservedBalance -= request.Amount;
         	await db.SaveChangesAsync();
-        	return (false, gatewayResult.Error ?? "FedNow gateway error", 400, null);
+        	throw new ArgumentException(gatewayResult.Error ?? "FedNow gateway error");
     	}
 
-    	// FedNow jest natychmiastowy (RTGS) — od razu rozlicz
     	fromAccount.Balance -= request.Amount;
     	fromAccount.ReservedBalance -= request.Amount;
     	toAccount.Balance += request.Amount;
@@ -431,7 +411,7 @@ public class TransferService(
 
     	await db.SaveChangesAsync();
 
-    	return (true, null, 201, new TransferResponse
+    	return new TransferResponse
     	{
         	Id = transfer.Id,
         	FromAccountId = transfer.FromAccountId,
@@ -444,12 +424,104 @@ public class TransferService(
         	CreatedAt = transfer.CreatedAt,
         	CompletedAt = transfer.CompletedAt,
         	RequiresApproval = transfer.RequiresApproval
-    	});
+    	};
 	}
-    
+
+    public async Task<TransferStatusResponse> GetStatusAsync(Guid userId, Guid transferId)
+    {
+        var transfer = await db.Transfers
+            .Include(t => t.FromAccount)
+            .FirstOrDefaultAsync(t => t.Id == transferId)
+            ?? throw new KeyNotFoundException("Transfer not found");
+
+        if (transfer.FromAccount.UserId != userId)
+            throw new UnauthorizedAccessException("Access denied");
+
+        return new TransferStatusResponse
+        {
+            TransferId = transfer.Id,
+            Status = transfer.Status,
+            Channel = transfer.Channel,
+            CreatedAt = transfer.CreatedAt,
+            CompletedAt = transfer.CompletedAt,
+            ExternalReferenceId = transfer.ExternalReferenceId
+        };
+    }
+
+    public async Task ProcessWebhookAsync(Guid transferId, string status, string? referenceId)
+    {
+        var transfer = await db.Transfers
+            .Include(t => t.FromAccount)
+            .Include(t => t.ToAccount)
+            .FirstOrDefaultAsync(t => t.Id == transferId)
+            ?? throw new KeyNotFoundException("Transfer not found");
+
+        if (transfer.Status != TransferStatus.Pending)
+            throw new ArgumentException("Transfer is not in pending state");
+
+        if (status == TransferStatus.Completed)
+        {
+            transfer.FromAccount.Balance -= transfer.Amount;
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            if (transfer.ToAccount is not null)
+                transfer.ToAccount.Balance += transfer.Amount;
+
+            transfer.Status = TransferStatus.Completed;
+            transfer.CompletedAt = DateTime.UtcNow;
+            transfer.ExternalReferenceId = referenceId ?? transfer.ExternalReferenceId;
+
+            var existingDebit = await db.Transactions.FirstOrDefaultAsync(t =>
+                t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit);
+
+            if (existingDebit is not null)
+            {
+                existingDebit.Status = TransactionStatus.Completed;
+            }
+            else
+            {
+                db.Transactions.Add(new Transaction
+                {
+                    Id = Guid.NewGuid(),
+                    AccountId = transfer.FromAccountId,
+                    Amount = transfer.Amount,
+                    Type = TransactionType.Debit,
+                    Status = TransactionStatus.Completed,
+                    Description = transfer.Description ?? $"{transfer.Channel} transfer",
+                    ReferenceId = transfer.Id.ToString(),
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            if (transfer.ToAccountId is not null)
+            {
+                db.Transactions.Add(new Transaction
+                {
+                    Id = Guid.NewGuid(),
+                    AccountId = transfer.ToAccountId.Value,
+                    Amount = transfer.Amount,
+                    Type = TransactionType.Credit,
+                    Status = TransactionStatus.Completed,
+                    Description = transfer.Description ?? $"{transfer.Channel} transfer",
+                    ReferenceId = transfer.Id.ToString(),
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+        }
+        else if (status == TransferStatus.Failed)
+        {
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            transfer.Status = TransferStatus.Failed;
+        }
+        else
+        {
+            throw new ArgumentException($"Invalid status '{status}'");
+        }
+
+        await db.SaveChangesAsync();
+    }
+
     private async Task<decimal?> GetDailyTransferLimitAsync(Guid accountId)
     {
-        // Karta prepaid junior ma limit — na razie zwracamy null (brak limitu)
         // TODO: US-30 — podpiąć limit z JuniorAccount/Card
         return await Task.FromResult<decimal?>(null);
     }

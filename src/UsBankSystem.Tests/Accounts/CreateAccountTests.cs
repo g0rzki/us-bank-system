@@ -104,20 +104,18 @@ public class CreateAccountTests
     }
 
     [Fact]
-    public async Task CreateAccount_InvalidType_Returns400()
+    public async Task CreateAccount_InvalidType_Throws()
     {
         var (controller, _, _) = await Setup();
-        var result = await controller.Create(new CreateAccountRequest { Type = "invalid" });
-        var bad = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal(400, bad.StatusCode);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            controller.Create(new CreateAccountRequest { Type = "invalid" }));
     }
 
     [Fact]
-    public async Task CreateAccount_InvalidCurrency_Returns400()
+    public async Task CreateAccount_InvalidCurrency_Throws()
     {
         var (controller, _, _) = await Setup();
-        var result = await controller.Create(new CreateAccountRequest { Type = "checking", Currency = "EUR" });
-        var bad = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal(400, bad.StatusCode);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            controller.Create(new CreateAccountRequest { Type = "checking", Currency = "EUR" }));
     }
 }

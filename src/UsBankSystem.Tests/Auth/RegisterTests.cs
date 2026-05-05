@@ -48,7 +48,7 @@ public class RegisterTests
     }
 
     [Fact]
-    public async Task Register_DuplicateEmail_Returns409()
+    public async Task Register_DuplicateEmail_Throws()
     {
         var db = CreateDb();
         var controller = CreateController(db);
@@ -61,10 +61,7 @@ public class RegisterTests
         };
 
         await controller.Register(request);
-        var result = await controller.Register(request);
-
-        var conflict = Assert.IsType<ConflictObjectResult>(result);
-        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => controller.Register(request));
     }
 
     [Fact]

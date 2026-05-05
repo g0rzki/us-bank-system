@@ -55,7 +55,7 @@ public class CreateInternalTransferTests
  			FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
     	});
     	var service = new TransferService(db, achGateway, rtpGateway, fedNowGateway, paymentConfig);
-    	var controller = new TransfersController(service);
+    	var controller = new TransfersController(service, CreateConfig());
     	controller.ControllerContext = new ControllerContext
     	{
         	HttpContext = new DefaultHttpContext
@@ -100,7 +100,6 @@ public class CreateInternalTransferTests
 
         var accounts = await db.Accounts.ToListAsync();
 
-        // Dodaj saldo na koncie źródłowym
         accounts[0].Balance = 1000m;
         await db.SaveChangesAsync();
 
@@ -170,63 +169,58 @@ public class CreateInternalTransferTests
     }
 
     [Fact]
-    public async Task CreateInternal_InsufficientFunds_Returns400()
+    public async Task CreateInternal_InsufficientFunds_Throws()
     {
         var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.CreateInternal(new CreateInternalTransferRequest
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateInternal(new CreateInternalTransferRequest
         {
             FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 9999m
-        });
-        var bad = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal(400, bad.StatusCode);
+        }));
     }
 
     [Fact]
-    public async Task CreateInternal_SameAccount_Returns400()
+    public async Task CreateInternal_SameAccount_Throws()
     {
         var (db, userId, fromAccountId, _) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.CreateInternal(new CreateInternalTransferRequest
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateInternal(new CreateInternalTransferRequest
         {
             FromAccountId = fromAccountId,
             ToAccountId = fromAccountId,
             Amount = 100m
-        });
-        Assert.IsType<BadRequestObjectResult>(result);
+        }));
     }
 
     [Fact]
-    public async Task CreateInternal_InvalidCurrency_Returns400()
+    public async Task CreateInternal_InvalidCurrency_Throws()
     {
         var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.CreateInternal(new CreateInternalTransferRequest
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateInternal(new CreateInternalTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountId = fromAccountId,
+            ToAccountId = toAccountId,
             Amount = 100m,
             Currency = "EUR"
-        });
-        Assert.IsType<BadRequestObjectResult>(result);
+        }));
     }
-    
+
     [Fact]
-    public async Task CreateInternal_BlockedAccount_Returns404()
+    public async Task CreateInternal_BlockedAccount_Throws()
     {
         var (db, userId, fromAccountId, toAccountId) = await Setup();
         var account = await db.Accounts.FindAsync(fromAccountId);
         account!.Status = AccountStatus.Blocked;
         await db.SaveChangesAsync();
         var controller = CreateController(db, userId);
-        var result = await controller.CreateInternal(new CreateInternalTransferRequest
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => controller.CreateInternal(new CreateInternalTransferRequest
         {
             FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 100m
-        });
-        Assert.IsType<NotFoundObjectResult>(result);
+        }));
     }
 }

@@ -59,7 +59,7 @@ public class CreateFedNowTransferTests
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode fedNowStatus = HttpStatusCode.OK)
     {
         var service = new TransferService(db, CreateAchGateway(), CreateRtpGateway(), CreateFedNowGateway(fedNowStatus), CreatePaymentConfig());
-        var controller = new TransfersController(service);
+        var controller = new TransfersController(service, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -168,31 +168,29 @@ public class CreateFedNowTransferTests
     }
 
     [Fact]
-    public async Task CreateFedNow_InsufficientFunds_Returns400()
+    public async Task CreateFedNow_InsufficientFunds_Throws()
     {
         var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.CreateFedNow(new CreateFedNowTransferRequest
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateFedNow(new CreateFedNowTransferRequest
         {
             FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 9999m
-        });
-        Assert.IsType<BadRequestObjectResult>(result);
+        }));
     }
 
     [Fact]
-    public async Task CreateFedNow_GatewayFailure_Returns400AndReleasesReservation()
+    public async Task CreateFedNow_GatewayFailure_ThrowsAndReleasesReservation()
     {
         var (db, userId, fromAccountId, toAccountId) = await Setup();
         var controller = CreateController(db, userId, HttpStatusCode.BadRequest);
-        var result = await controller.CreateFedNow(new CreateFedNowTransferRequest
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateFedNow(new CreateFedNowTransferRequest
         {
             FromAccountId = fromAccountId,
             ToAccountId = toAccountId,
             Amount = 100m
-        });
-        Assert.IsType<BadRequestObjectResult>(result);
+        }));
         var account = await db.Accounts.FindAsync(fromAccountId);
         Assert.Equal(0m, account!.ReservedBalance);
     }
