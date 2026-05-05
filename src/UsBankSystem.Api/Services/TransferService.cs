@@ -427,6 +427,30 @@ public class TransferService(
     	};
 	}
 
+    public async Task<List<TransferResponse>> GetAllAsync(Guid userId)
+    {
+        return await db.Transfers
+            .Include(t => t.FromAccount)
+            .Where(t => t.FromAccount.UserId == userId || db.Accounts.Any(a => a.Id == t.ToAccountId && a.UserId == userId))
+            .OrderByDescending(t => t.CreatedAt)
+            .Select(t => new TransferResponse
+            {
+                Id = t.Id,
+                FromAccountId = t.FromAccountId,
+                ToAccountId = t.ToAccountId,
+                Amount = t.Amount,
+                Currency = t.Currency,
+                Channel = t.Channel,
+                Status = t.Status,
+                Description = t.Description,
+                CreatedAt = t.CreatedAt,
+                CompletedAt = t.CompletedAt,
+                RequiresApproval = t.RequiresApproval,
+                EstimatedSettlement = null
+            })
+            .ToListAsync();
+    }
+
     public async Task<TransferStatusResponse> GetStatusAsync(Guid userId, Guid transferId)
     {
         var transfer = await db.Transfers
