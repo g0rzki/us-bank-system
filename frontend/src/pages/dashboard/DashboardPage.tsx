@@ -82,7 +82,7 @@ export default function DashboardPage() {
                 ) : (
                     <>
                         {view === 'overview' && <OverviewView accounts={accounts} transactions={transactions} onNavigate={setView} />}
-                        {view === 'accounts' && <AccountsView accounts={accounts} />}
+                        {view === 'accounts' && <AccountsView accounts={accounts} onAccountCreated={acc => setAccounts(prev => [...prev, acc])} />}
                         {view === 'transfers' && <TransfersView />}
                         {view === 'history' && <HistoryView accounts={accounts} />}
                         {view === 'settings' && <SettingsView />}

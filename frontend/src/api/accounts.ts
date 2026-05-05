@@ -39,3 +39,8 @@ export async function getTransactions(accountId: string, page = 1, pageSize = 10
     });
     return res.data;
 }
+
+export async function createAccount(type: string): Promise<Account> {
+    const res = await client.post<Account>('/accounts', { type, currency: 'USD' });
+    return res.data;
+}
