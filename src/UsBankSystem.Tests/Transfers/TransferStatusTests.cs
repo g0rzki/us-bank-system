@@ -1,0 +1,222 @@
+using System.Net;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using UsBankSystem.Api.Configuration;
+using UsBankSystem.Api.Controllers;
+using UsBankSystem.Api.Integrations;
+using UsBankSystem.Api.Models.Auth;
+using UsBankSystem.Api.Models.Requests;
+using UsBankSystem.Api.Models.Responses;
+using UsBankSystem.Api.Services;
+using UsBankSystem.Core.Domain.Transfers;
+using UsBankSystem.Infrastructure.Persistence;
+using UsBankSystem.Tests.Helpers;
+
+namespace UsBankSystem.Tests.Transfers;
+
+public class TransferStatusTests
+{
+    private const string WebhookSecret = "test_webhook_secret";
+
+    private AppDbContext CreateDb() =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options);
+
+    private IConfiguration CreateConfig() =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Secret"] = "test_secret_minimum_32_characters_required!",
+                ["Webhook:Secret"] = WebhookSecret
+            })
+            .Build();
+
+    private IOptions<PaymentSessionConfig> CreatePaymentConfig() =>
+        Options.Create(new PaymentSessionConfig
+        {
+            Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
+            Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
+            FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
+        });
+
+    private TransfersController CreateController(AppDbContext db, Guid userId)
+    {
+        var achGateway = new AchGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"referenceId":"ACH-REF-001"}"""))
+                { BaseAddress = new Uri("http://localhost:6001") },
+            NullLogger<AchGateway>.Instance);
+        var rtpGateway = new RtpGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+                { BaseAddress = new Uri("http://localhost:6002") },
+            NullLogger<RtpGateway>.Instance);
+        var fedNowGateway = new FedNowGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+                { BaseAddress = new Uri("http://localhost:6003") },
+            NullLogger<FedNowGateway>.Instance);
+
+        var service = new TransferService(db, achGateway, rtpGateway, fedNowGateway, CreatePaymentConfig());
+        var controller = new TransfersController(service, CreateConfig());
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                {
+                    new Claim(ClaimTypes.NameIdentifier, userId.ToString())
+                }))
+            }
+        };
+        return controller;
+    }
+
+    private async Task<(AppDbContext db, Guid userId, Guid fromAccountId, Guid toAccountId)> Setup()
+    {
+        var db = CreateDb();
+        var authService = new AuthService(db, CreateConfig());
+        await authService.RegisterAsync(new RegisterRequest
+        {
+            Email = "test@example.com",
+            Password = "Password123!",
+            FirstName = "Jan",
+            LastName = "Kowalski"
+        });
+        var user = await db.Users.FirstAsync();
+        var accountService = new AccountService(db);
+        var accountController = new AccountsController(accountService);
+        accountController.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                {
+                    new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())
+                }))
+            }
+        };
+        await accountController.Create(new CreateAccountRequest { Type = "checking" });
+        await accountController.Create(new CreateAccountRequest { Type = "savings" });
+        var accounts = await db.Accounts.ToListAsync();
+        accounts[0].Balance = 1000m;
+        await db.SaveChangesAsync();
+        return (db, user.Id, accounts[0].Id, accounts[1].Id);
+    }
+
+    private static CreateAchTransferRequest AchRequest(Guid fromAccountId) => new()
+    {
+        FromAccountId = fromAccountId,
+        ToRoutingNumber = "021000021",
+        ToAccountNumber = "9876543210",
+        Amount = 100m
+    };
+
+    [Fact]
+    public async Task GetStatus_ValidTransfer_Returns200WithStatus()
+    {
+        var (db, userId, fromAccountId, toAccountId) = await Setup();
+        var controller = CreateController(db, userId);
+        await controller.CreateAch(AchRequest(fromAccountId));
+        var transfer = await db.Transfers.FirstAsync();
+
+        var result = await controller.GetStatus(transfer.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<TransferStatusResponse>(ok.Value);
+        Assert.Equal(transfer.Id, response.TransferId);
+        Assert.Equal(TransferStatus.Pending, response.Status);
+        Assert.Equal(TransferChannel.Ach, response.Channel);
+    }
+
+    [Fact]
+    public async Task GetStatus_OtherUsersTransfer_Returns403()
+    {
+        var (db, userId, fromAccountId, _) = await Setup();
+        var controller = CreateController(db, userId);
+        await controller.CreateAch(AchRequest(fromAccountId));
+        var transfer = await db.Transfers.FirstAsync();
+
+        var otherController = CreateController(db, Guid.NewGuid());
+        var result = await otherController.GetStatus(transfer.Id);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task GetStatus_NotFound_Returns404()
+    {
+        var (db, userId, _, _) = await Setup();
+        var controller = CreateController(db, userId);
+
+        var result = await controller.GetStatus(Guid.NewGuid());
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task Webhook_Completed_UpdatesBalanceAndStatus()
+    {
+        var (db, userId, fromAccountId, _) = await Setup();
+        var controller = CreateController(db, userId);
+        await controller.CreateAch(AchRequest(fromAccountId));
+        var transfer = await db.Transfers.FirstAsync();
+
+        controller.ControllerContext.HttpContext.Request.Headers["X-Webhook-Secret"] = WebhookSecret;
+        var result = await controller.Webhook(transfer.Id, new WebhookRequest
+        {
+            Status = TransferStatus.Completed,
+            ReferenceId = "ACH-SETTLED-001"
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+        var from = await db.Accounts.FindAsync(fromAccountId);
+        Assert.Equal(900m, from!.Balance);
+        Assert.Equal(0m, from.ReservedBalance);
+        var updated = await db.Transfers.FindAsync(transfer.Id);
+        Assert.Equal(TransferStatus.Completed, updated!.Status);
+        Assert.Equal("ACH-SETTLED-001", updated.ExternalReferenceId);
+    }
+
+    [Fact]
+    public async Task Webhook_Failed_ReleasesReservation()
+    {
+        var (db, userId, fromAccountId, _) = await Setup();
+        var controller = CreateController(db, userId);
+        await controller.CreateAch(AchRequest(fromAccountId));
+        var transfer = await db.Transfers.FirstAsync();
+
+        controller.ControllerContext.HttpContext.Request.Headers["X-Webhook-Secret"] = WebhookSecret;
+        var result = await controller.Webhook(transfer.Id, new WebhookRequest
+        {
+            Status = TransferStatus.Failed
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+        var from = await db.Accounts.FindAsync(fromAccountId);
+        Assert.Equal(0m, from!.ReservedBalance);
+        Assert.Equal(1000m, from.Balance);
+        var updated = await db.Transfers.FindAsync(transfer.Id);
+        Assert.Equal(TransferStatus.Failed, updated!.Status);
+    }
+
+    [Fact]
+    public async Task Webhook_InvalidSecret_Returns401()
+    {
+        var (db, userId, fromAccountId, _) = await Setup();
+        var controller = CreateController(db, userId);
+        await controller.CreateAch(AchRequest(fromAccountId));
+        var transfer = await db.Transfers.FirstAsync();
+
+        controller.ControllerContext.HttpContext.Request.Headers["X-Webhook-Secret"] = "wrong_secret";
+        var result = await controller.Webhook(transfer.Id, new WebhookRequest
+        {
+            Status = TransferStatus.Completed
+        });
+
+        Assert.IsType<UnauthorizedObjectResult>(result);
+    }
+}

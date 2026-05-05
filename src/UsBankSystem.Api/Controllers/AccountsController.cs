@@ -22,6 +22,16 @@ public class AccountsController(AccountService accountService) : ControllerBase
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
+    [HttpGet]
+    [ProducesResponseType(typeof(List<AccountResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetAll()
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        var result = await accountService.GetAllAsync(userId);
+        return Ok(result);
+    }
+
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(AccountResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

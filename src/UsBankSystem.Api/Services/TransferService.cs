@@ -427,6 +427,89 @@ public class TransferService(
     	};
 	}
 
+    public async Task<TransferStatusResponse> GetStatusAsync(Guid userId, Guid transferId)
+    {
+        var transfer = await db.Transfers
+            .Include(t => t.FromAccount)
+            .FirstOrDefaultAsync(t => t.Id == transferId)
+            ?? throw new KeyNotFoundException("Transfer not found");
+
+        if (transfer.FromAccount.UserId != userId)
+            throw new UnauthorizedAccessException("Access denied");
+
+        return new TransferStatusResponse
+        {
+            TransferId = transfer.Id,
+            Status = transfer.Status,
+            Channel = transfer.Channel,
+            CreatedAt = transfer.CreatedAt,
+            CompletedAt = transfer.CompletedAt,
+            ExternalReferenceId = transfer.ExternalReferenceId
+        };
+    }
+
+    public async Task ProcessWebhookAsync(Guid transferId, string status, string? referenceId)
+    {
+        var transfer = await db.Transfers
+            .Include(t => t.FromAccount)
+            .Include(t => t.ToAccount)
+            .FirstOrDefaultAsync(t => t.Id == transferId)
+            ?? throw new KeyNotFoundException("Transfer not found");
+
+        if (transfer.Status != TransferStatus.Pending)
+            throw new ArgumentException("Transfer is not in pending state");
+
+        if (status == TransferStatus.Completed)
+        {
+            transfer.FromAccount.Balance -= transfer.Amount;
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            if (transfer.ToAccount is not null)
+                transfer.ToAccount.Balance += transfer.Amount;
+
+            transfer.Status = TransferStatus.Completed;
+            transfer.CompletedAt = DateTime.UtcNow;
+            transfer.ExternalReferenceId = referenceId ?? transfer.ExternalReferenceId;
+
+            db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(),
+                AccountId = transfer.FromAccountId,
+                Amount = transfer.Amount,
+                Type = TransactionType.Debit,
+                Status = TransactionStatus.Completed,
+                Description = transfer.Description ?? $"{transfer.Channel} transfer",
+                ReferenceId = transfer.Id.ToString(),
+                CreatedAt = DateTime.UtcNow
+            });
+
+            if (transfer.ToAccountId is not null)
+            {
+                db.Transactions.Add(new Transaction
+                {
+                    Id = Guid.NewGuid(),
+                    AccountId = transfer.ToAccountId.Value,
+                    Amount = transfer.Amount,
+                    Type = TransactionType.Credit,
+                    Status = TransactionStatus.Completed,
+                    Description = transfer.Description ?? $"{transfer.Channel} transfer",
+                    ReferenceId = transfer.Id.ToString(),
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+        }
+        else if (status == TransferStatus.Failed)
+        {
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            transfer.Status = TransferStatus.Failed;
+        }
+        else
+        {
+            throw new ArgumentException($"Invalid status '{status}'");
+        }
+
+        await db.SaveChangesAsync();
+    }
+
     private async Task<decimal?> GetDailyTransferLimitAsync(Guid accountId)
     {
         // TODO: US-30 — podpiąć limit z JuniorAccount/Card

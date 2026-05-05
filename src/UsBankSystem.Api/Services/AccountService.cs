@@ -50,6 +50,24 @@ public class AccountService(AppDbContext db)
         };
     }
 
+    public async Task<List<AccountResponse>> GetAllAsync(Guid userId)
+    {
+        return await db.Accounts
+            .Where(a => a.UserId == userId)
+            .OrderBy(a => a.CreatedAt)
+            .Select(a => new AccountResponse
+            {
+                Id = a.Id,
+                AccountNumber = a.AccountNumber,
+                Type = a.Type,
+                Balance = a.Balance,
+                Currency = a.Currency,
+                Status = a.Status,
+                CreatedAt = a.CreatedAt
+            })
+            .ToListAsync();
+    }
+
     public async Task<AccountResponse> GetByIdAsync(Guid userId, Guid accountId)
     {
         var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId)
