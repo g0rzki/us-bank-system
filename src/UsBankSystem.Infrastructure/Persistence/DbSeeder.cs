@@ -190,6 +190,34 @@ public static class DbSeeder
             new()
             {
                 Id = Guid.NewGuid(),
+                FromAccountId = account1Checking.Id,
+                ToAccountId = account2Checking.Id,
+                Amount = 350.00m,
+                Currency = "USD",
+                Channel = "rtp",
+                Status = "completed",
+                ExternalReferenceId = "RTP-REF-20240418-001",
+                Description = "Freelance payment",
+                CreatedAt = DateTime.UtcNow.AddDays(-6),
+                CompletedAt = DateTime.UtcNow.AddDays(-6)
+            },
+            new()
+            {
+                Id = Guid.NewGuid(),
+                FromAccountId = account1Checking.Id,
+                ToAccountId = account2Checking.Id,
+                Amount = 75.50m,
+                Currency = "USD",
+                Channel = "fednow",
+                Status = "completed",
+                ExternalReferenceId = "FEDNOW-REF-20240420-001",
+                Description = "Dinner split",
+                CreatedAt = DateTime.UtcNow.AddDays(-3),
+                CompletedAt = DateTime.UtcNow.AddDays(-3)
+            },
+            new()
+            {
+                Id = Guid.NewGuid(),
                 FromAccountId = account2Checking.Id,
                 ToAccountId = null,
                 Amount = 1000.00m,
@@ -199,6 +227,19 @@ public static class DbSeeder
                 ExternalReferenceId = "ACH-2024-001234",
                 Description = "External transfer",
                 CreatedAt = DateTime.UtcNow.AddDays(-1)
+            },
+            new()
+            {
+                Id = Guid.NewGuid(),
+                FromAccountId = account1Checking.Id,
+                ToAccountId = account3Checking.Id,
+                Amount = 120.00m,
+                Currency = "USD",
+                Channel = "ach",
+                Status = "failed",
+                ExternalReferenceId = "ACH-2024-001235",
+                Description = "Invoice payment",
+                CreatedAt = DateTime.UtcNow.AddDays(-2)
             }
         };
 
