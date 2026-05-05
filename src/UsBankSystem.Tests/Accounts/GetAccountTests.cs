@@ -87,22 +87,18 @@ public class GetAccountTests
     }
 
     [Fact]
-    public async Task GetById_NotFound_Returns404()
+    public async Task GetById_NotFound_Throws()
     {
         var (db, userId, _) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.GetById(Guid.NewGuid());
-        var notFound = Assert.IsType<NotFoundObjectResult>(result);
-        Assert.Equal(404, notFound.StatusCode);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => controller.GetById(Guid.NewGuid()));
     }
 
     [Fact]
-    public async Task GetById_OtherUsersAccount_Returns403()
+    public async Task GetById_OtherUsersAccount_Throws()
     {
         var (db, _, accountId) = await Setup();
-        var otherUserId = Guid.NewGuid();
-        var controller = CreateController(db, otherUserId);
-        var result = await controller.GetById(accountId);
-        Assert.IsType<ForbidResult>(result);
+        var controller = CreateController(db, Guid.NewGuid());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => controller.GetById(accountId));
     }
 }

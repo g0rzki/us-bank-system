@@ -88,21 +88,18 @@ public class GetBalanceTests
     }
 
     [Fact]
-    public async Task GetBalance_NotFound_Returns404()
+    public async Task GetBalance_NotFound_Throws()
     {
         var (db, userId, _) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.GetBalance(Guid.NewGuid());
-        var notFound = Assert.IsType<NotFoundObjectResult>(result);
-        Assert.Equal(404, notFound.StatusCode);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => controller.GetBalance(Guid.NewGuid()));
     }
 
     [Fact]
-    public async Task GetBalance_OtherUsersAccount_Returns403()
+    public async Task GetBalance_OtherUsersAccount_Throws()
     {
         var (db, _, accountId) = await Setup();
         var controller = CreateController(db, Guid.NewGuid());
-        var result = await controller.GetBalance(accountId);
-        Assert.IsType<ForbidResult>(result);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => controller.GetBalance(accountId));
     }
 }

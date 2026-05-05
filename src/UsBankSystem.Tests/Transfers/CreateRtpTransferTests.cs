@@ -58,7 +58,7 @@ public class CreateRtpTransferTests
                 { BaseAddress = new Uri("http://localhost:6003") },
             NullLogger<FedNowGateway>.Instance);
         var service = new TransferService(db, CreateAchGateway(), CreateRtpGateway(rtpStatus), fedNowGateway,CreatePaymentConfig());
-        var controller = new TransfersController(service);
+        var controller = new TransfersController(service, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext

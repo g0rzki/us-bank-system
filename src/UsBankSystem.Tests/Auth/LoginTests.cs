@@ -59,33 +59,29 @@ public class LoginTests
     }
 
     [Fact]
-    public async Task Login_WrongPassword_Returns401()
+    public async Task Login_WrongPassword_Throws()
     {
         var db = CreateDb();
         var controller = await CreateControllerWithUser(db);
 
-        var result = await controller.Login(new LoginRequest
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => controller.Login(new LoginRequest
         {
             Email = "test@example.com",
             Password = "WrongPassword!"
-        });
-
-        Assert.IsType<UnauthorizedObjectResult>(result);
+        }));
     }
 
     [Fact]
-    public async Task Login_NonExistentEmail_Returns401()
+    public async Task Login_NonExistentEmail_Throws()
     {
         var db = CreateDb();
         var controller = await CreateControllerWithUser(db);
 
-        var result = await controller.Login(new LoginRequest
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => controller.Login(new LoginRequest
         {
             Email = "nieistnieje@example.com",
             Password = "Password123!"
-        });
-
-        Assert.IsType<UnauthorizedObjectResult>(result);
+        }));
     }
 
     [Fact]
@@ -104,7 +100,7 @@ public class LoginTests
     }
 
     [Fact]
-    public async Task Login_InactiveUser_Returns401()
+    public async Task Login_InactiveUser_Throws()
     {
         var db = CreateDb();
         var controller = await CreateControllerWithUser(db);
@@ -113,12 +109,10 @@ public class LoginTests
         user.Status = "inactive";
         await db.SaveChangesAsync();
 
-        var result = await controller.Login(new LoginRequest
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => controller.Login(new LoginRequest
         {
             Email = "test@example.com",
             Password = "Password123!"
-        });
-
-        Assert.IsType<UnauthorizedObjectResult>(result);
+        }));
     }
 }

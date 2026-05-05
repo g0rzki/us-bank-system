@@ -1,6 +1,5 @@
 using System.Net;
 using System.Security.Claims;
-using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -61,7 +60,7 @@ public class CreateAchTransferTests
             	{ BaseAddress = new Uri("http://localhost:6003") },
         	NullLogger<FedNowGateway>.Instance);
         var service = new TransferService(db, gateway, rtpGateway, fedNowGateway, CreatePaymentConfig());
-        var controller = new TransfersController(service);
+        var controller = new TransfersController(service, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -140,33 +139,31 @@ public class CreateAchTransferTests
     }
 
     [Fact]
-    public async Task CreateAch_InsufficientFunds_Returns400()
+    public async Task CreateAch_InsufficientFunds_Throws()
     {
         var (db, userId, accountId) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.CreateAch(new CreateAchTransferRequest
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateAch(new CreateAchTransferRequest
         {
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
             Amount = 9999m
-        });
-        Assert.IsType<BadRequestObjectResult>(result);
+        }));
     }
 
     [Fact]
-    public async Task CreateAch_GatewayFailure_Returns400AndReleasesReservation()
+    public async Task CreateAch_GatewayFailure_ThrowsAndReleasesReservation()
     {
         var (db, userId, accountId) = await Setup();
         var controller = CreateController(db, userId, HttpStatusCode.BadRequest);
-        var result = await controller.CreateAch(new CreateAchTransferRequest
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateAch(new CreateAchTransferRequest
         {
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
             Amount = 100m
-        });
-        Assert.IsType<BadRequestObjectResult>(result);
+        }));
         var account = await db.Accounts.FindAsync(accountId);
         Assert.Equal(0m, account!.ReservedBalance);
     }

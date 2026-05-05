@@ -133,20 +133,18 @@ public class GetTransactionsTests
     }
 
     [Fact]
-    public async Task GetTransactions_NotFound_Returns404()
+    public async Task GetTransactions_NotFound_Throws()
     {
         var (db, userId, _) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.GetTransactions(Guid.NewGuid());
-        Assert.IsType<NotFoundObjectResult>(result);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => controller.GetTransactions(Guid.NewGuid()));
     }
 
     [Fact]
-    public async Task GetTransactions_OtherUsersAccount_Returns403()
+    public async Task GetTransactions_OtherUsersAccount_Throws()
     {
         var (db, _, accountId) = await Setup();
         var controller = CreateController(db, Guid.NewGuid());
-        var result = await controller.GetTransactions(accountId);
-        Assert.IsType<ForbidResult>(result);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => controller.GetTransactions(accountId));
     }
 }

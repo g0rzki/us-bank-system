@@ -59,7 +59,7 @@ public class CreateFedNowTransferTests
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode fedNowStatus = HttpStatusCode.OK)
     {
         var service = new TransferService(db, CreateAchGateway(), CreateRtpGateway(), CreateFedNowGateway(fedNowStatus), CreatePaymentConfig());
-        var controller = new TransfersController(service);
+        var controller = new TransfersController(service, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
