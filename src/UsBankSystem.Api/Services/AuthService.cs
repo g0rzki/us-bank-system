@@ -12,11 +12,11 @@ namespace UsBankSystem.Api.Services;
 
 public class AuthService(AppDbContext db, IConfiguration config)
 {
-    public async Task<(bool Success, string? Error, object? Result)> RegisterAsync(RegisterRequest request)
+    public async Task<object> RegisterAsync(RegisterRequest request)
     {
         var emailTaken = await db.Users.AnyAsync(u => u.Email == request.Email.ToLowerInvariant());
         if (emailTaken)
-            return (false, "Email is already taken", null);
+            throw new ArgumentException("Email is already taken");
 
         var user = new User
         {
@@ -32,19 +32,19 @@ public class AuthService(AppDbContext db, IConfiguration config)
         db.Users.Add(user);
         await db.SaveChangesAsync();
 
-        return (true, null, new { id = user.Id, email = user.Email });
+        return new { id = user.Id, email = user.Email };
     }
 
-    public async Task<(bool Success, string? Error, LoginResponse? Token)> LoginAsync(LoginRequest request)
+    public async Task<LoginResponse> LoginAsync(LoginRequest request)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Email == request.Email.ToLowerInvariant());
         if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
-            return (false, "Invalid email or password", null);
+            throw new UnauthorizedAccessException("Invalid email or password");
 
         if (user.Status != UserStatus.Active)
-            return (false, "Account is not active", null);
+            throw new UnauthorizedAccessException("Account is not active");
 
-        return (true, null, GenerateJwt(user));
+        return GenerateJwt(user);
     }
 
     private LoginResponse GenerateJwt(User user)

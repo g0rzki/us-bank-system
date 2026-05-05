@@ -18,13 +18,10 @@ public class AccountsController(AccountService accountService) : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateAccountRequest request)
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
-        var (success, error, result) = await accountService.CreateAsync(userId, request);
-        if (!success)
-            return BadRequest(new { message = error });
-
+        var result = await accountService.CreateAsync(userId, request);
         return StatusCode(StatusCodes.Status201Created, result);
     }
-    
+
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(AccountResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -33,13 +30,8 @@ public class AccountsController(AccountService accountService) : ControllerBase
     public async Task<IActionResult> GetById(Guid id)
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
-        var (success, error, statusCode, result) = await accountService.GetByIdAsync(userId, id);
-        return statusCode switch
-        {
-            404 => NotFound(new { message = error }),
-            403 => Forbid(),
-            _ => Ok(result)
-        };
+        var result = await accountService.GetByIdAsync(userId, id);
+        return Ok(result);
     }
     
     [HttpGet("{id:guid}/balance")]
@@ -49,15 +41,10 @@ public class AccountsController(AccountService accountService) : ControllerBase
     public async Task<IActionResult> GetBalance(Guid id)
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
-        var (success, error, statusCode, result) = await accountService.GetBalanceAsync(userId, id);
-        return statusCode switch
-        {
-            404 => NotFound(new { message = error }),
-            403 => Forbid(),
-            _ => Ok(result)
-        };
+        var result = await accountService.GetBalanceAsync(userId, id);
+        return Ok(result);
     }
-    
+
     [HttpGet("{id:guid}/transactions")]
     [ProducesResponseType(typeof(PagedResponse<TransactionResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -65,12 +52,7 @@ public class AccountsController(AccountService accountService) : ControllerBase
     public async Task<IActionResult> GetTransactions(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
-        var (success, error, statusCode, result) = await accountService.GetTransactionsAsync(userId, id, page, pageSize);
-        return statusCode switch
-        {
-            404 => NotFound(new { message = error }),
-            403 => Forbid(),
-            _ => Ok(result)
-        };
+        var result = await accountService.GetTransactionsAsync(userId, id, page, pageSize);
+        return Ok(result);
     }
 }

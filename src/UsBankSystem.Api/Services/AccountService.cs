@@ -10,17 +10,17 @@ namespace UsBankSystem.Api.Services;
 
 public class AccountService(AppDbContext db)
 {
-    public async Task<(bool Success, string? Error, AccountResponse? Result)> CreateAsync(Guid userId, CreateAccountRequest request)
+    public async Task<AccountResponse> CreateAsync(Guid userId, CreateAccountRequest request)
     {
         if (!AccountType.IsValid(request.Type))
-            return (false, $"Invalid account type. Allowed values: '{AccountType.Checking}', '{AccountType.Savings}'", null);
+            throw new ArgumentException($"Invalid account type. Allowed values: '{AccountType.Checking}', '{AccountType.Savings}'");
 
         if (!CurrencyCode.IsValid(request.Currency))
-            return (false, $"Unsupported currency '{request.Currency}'. Allowed values: '{CurrencyCode.USD}'", null);
+            throw new ArgumentException($"Unsupported currency '{request.Currency}'. Allowed values: '{CurrencyCode.USD}'");
 
         var userExists = await db.Users.AnyAsync(u => u.Id == userId);
         if (!userExists)
-            return (false, "User not found", null);
+            throw new KeyNotFoundException("User not found");
 
         var account = new Account
         {
@@ -38,7 +38,7 @@ public class AccountService(AppDbContext db)
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
 
-        return (true, null, new AccountResponse
+        return new AccountResponse
         {
             Id = account.Id,
             AccountNumber = account.AccountNumber,
@@ -47,20 +47,18 @@ public class AccountService(AppDbContext db)
             Currency = account.Currency,
             Status = account.Status,
             CreatedAt = account.CreatedAt
-        });
+        };
     }
-    
-    public async Task<(bool Success, string? Error, int StatusCode, AccountResponse? Result)> GetByIdAsync(Guid userId, Guid accountId)
-    {
-        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId);
 
-        if (account is null)
-            return (false, "Account not found", 404, null);
+    public async Task<AccountResponse> GetByIdAsync(Guid userId, Guid accountId)
+    {
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId)
+            ?? throw new KeyNotFoundException("Account not found");
 
         if (account.UserId != userId)
-            return (false, "Access denied", 403, null);
+            throw new UnauthorizedAccessException("Access denied");
 
-        return (true, null, 200, new AccountResponse
+        return new AccountResponse
         {
             Id = account.Id,
             AccountNumber = account.AccountNumber,
@@ -69,38 +67,34 @@ public class AccountService(AppDbContext db)
             Currency = account.Currency,
             Status = account.Status,
             CreatedAt = account.CreatedAt
-        });
+        };
     }
-    
-    public async Task<(bool Success, string? Error, int StatusCode, BalanceResponse? Result)> GetBalanceAsync(Guid userId, Guid accountId)
-    {
-        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId);
 
-        if (account is null)
-            return (false, "Account not found", 404, null);
+    public async Task<BalanceResponse> GetBalanceAsync(Guid userId, Guid accountId)
+    {
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId)
+            ?? throw new KeyNotFoundException("Account not found");
 
         if (account.UserId != userId)
-            return (false, "Access denied", 403, null);
+            throw new UnauthorizedAccessException("Access denied");
 
-        return (true, null, 200, new BalanceResponse
+        return new BalanceResponse
         {
             AccountId = account.Id,
             Balance = account.Balance,
             ReservedBalance = account.ReservedBalance,
             AvailableBalance = account.Balance - account.ReservedBalance,
             Currency = account.Currency
-        });
+        };
     }
-    
-    public async Task<(bool Success, string? Error, int StatusCode, PagedResponse<TransactionResponse>? Result)> GetTransactionsAsync(Guid userId, Guid accountId, int page, int pageSize)
-    {
-        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId);
 
-        if (account is null)
-            return (false, "Account not found", 404, null);
+    public async Task<PagedResponse<TransactionResponse>> GetTransactionsAsync(Guid userId, Guid accountId, int page, int pageSize)
+    {
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId)
+            ?? throw new KeyNotFoundException("Account not found");
 
         if (account.UserId != userId)
-            return (false, "Access denied", 403, null);
+            throw new UnauthorizedAccessException("Access denied");
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
@@ -125,14 +119,14 @@ public class AccountService(AppDbContext db)
             })
             .ToListAsync();
 
-        return (true, null, 200, new PagedResponse<TransactionResponse>
+        return new PagedResponse<TransactionResponse>
         {
             Items = items,
             Page = page,
             PageSize = pageSize,
             Total = total,
             TotalPages = (int)Math.Ceiling((double)total / pageSize)
-        });
+        };
     }
 
     private static async Task<string> GenerateAccountNumberAsync(AppDbContext db)
