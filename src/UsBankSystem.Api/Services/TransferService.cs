@@ -17,6 +17,7 @@ public class TransferService(
 	AppDbContext db, 
 	AchGateway achGateway,
 	RtpGateway rtpGateway,
+	FedNowGateway fedNowGateway,
 	IOptions<PaymentSessionConfig> paymentConfig)
 {
     public async Task<(bool Success, string? Error, int StatusCode, TransferResponse? Result)> CreateInternalAsync(Guid userId, CreateInternalTransferRequest request)
@@ -309,6 +310,120 @@ public class TransferService(
             	Type = TransactionType.Credit,
             	Status = TransactionStatus.Completed,
             	Description = request.Description ?? "RTP transfer",
+            	ReferenceId = transfer.Id.ToString(),
+            	CreatedAt = DateTime.UtcNow
+        	}
+    	);
+
+    	await db.SaveChangesAsync();
+
+    	return (true, null, 201, new TransferResponse
+    	{
+        	Id = transfer.Id,
+        	FromAccountId = transfer.FromAccountId,
+        	ToAccountId = transfer.ToAccountId,
+        	Amount = transfer.Amount,
+        	Currency = transfer.Currency,
+        	Channel = transfer.Channel,
+        	Status = transfer.Status,
+        	Description = transfer.Description,
+        	CreatedAt = transfer.CreatedAt,
+        	CompletedAt = transfer.CompletedAt,
+        	RequiresApproval = transfer.RequiresApproval
+    	});
+	}
+
+	public async Task<(bool Success, string? Error, int StatusCode, TransferResponse? Result)> CreateFedNowAsync(Guid userId, CreateFedNowTransferRequest request)
+	{
+    	if (!CurrencyCode.IsValid(request.Currency))
+        	return (false, $"Unsupported currency '{request.Currency}'", 400, null);
+
+    	var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active);
+    	if (fromAccount is null)
+        	return (false, "Source account not found or inactive", 404, null);
+
+    	var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active);
+    	if (toAccount is null)
+        	return (false, "Destination account not found or inactive", 404, null);
+
+    	if (fromAccount.Id == toAccount.Id)
+        	return (false, "Cannot transfer to the same account", 400, null);
+
+    	var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
+    	if (availableBalance < request.Amount)
+        	return (false, "Insufficient funds", 400, null);
+
+    	var timeout = paymentConfig.Value.FedNow.TimeoutSeconds;
+
+    	// Zablokuj środki
+    	fromAccount.ReservedBalance += request.Amount;
+
+    	var transfer = new Transfer
+    	{
+        	Id = Guid.NewGuid(),
+        	FromAccountId = fromAccount.Id,
+        	ToAccountId = toAccount.Id,
+        	Amount = request.Amount,
+        	Currency = request.Currency.ToUpperInvariant(),
+        	Channel = TransferChannel.FedNow,
+        	Status = TransferStatus.Pending,
+        	Description = request.Description,
+        	RequiresApproval = false,
+        	CreatedAt = DateTime.UtcNow
+    	};
+
+    	db.Transfers.Add(transfer);
+    	await db.SaveChangesAsync();
+
+    	// Wyślij do modułu FedNow z timeoutem
+    	using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
+    	var gatewayResult = await fedNowGateway.SendAsync(new(
+        	TransferId: transfer.Id,
+        	Amount: transfer.Amount,
+        	Currency: transfer.Currency,
+        	Description: transfer.Description,
+        	Metadata: new Dictionary<string, string>
+        	{
+            	["toAccountId"] = toAccount.Id.ToString()
+        	}
+    	), cts.Token);
+
+    	if (!gatewayResult.Success)
+    	{
+        	transfer.Status = TransferStatus.Failed;
+        	fromAccount.ReservedBalance -= request.Amount;
+        	await db.SaveChangesAsync();
+        	return (false, gatewayResult.Error ?? "FedNow gateway error", 400, null);
+    	}
+
+    	// FedNow jest natychmiastowy (RTGS) — od razu rozlicz
+    	fromAccount.Balance -= request.Amount;
+    	fromAccount.ReservedBalance -= request.Amount;
+    	toAccount.Balance += request.Amount;
+    	transfer.Status = TransferStatus.Completed;
+    	transfer.CompletedAt = DateTime.UtcNow;
+    	transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
+
+    	db.Transactions.AddRange(
+        	new Transaction
+        	{
+            	Id = Guid.NewGuid(),
+            	AccountId = fromAccount.Id,
+            	Amount = request.Amount,
+            	Type = TransactionType.Debit,
+            	Status = TransactionStatus.Completed,
+            	Description = request.Description ?? "FedNow transfer",
+            	ReferenceId = transfer.Id.ToString(),
+            	CreatedAt = DateTime.UtcNow
+        	},
+        	new Transaction
+        	{
+            	Id = Guid.NewGuid(),
+            	AccountId = toAccount.Id,
+            	Amount = request.Amount,
+            	Type = TransactionType.Credit,
+            	Status = TransactionStatus.Completed,
+            	Description = request.Description ?? "FedNow transfer",
             	ReferenceId = transfer.Id.ToString(),
             	CreatedAt = DateTime.UtcNow
         	}
