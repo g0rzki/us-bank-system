@@ -13,6 +13,7 @@ using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
+using UsBankSystem.Core.Domain.Transactions;
 using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Infrastructure.Persistence;
 using UsBankSystem.Tests.Helpers;
@@ -175,6 +176,9 @@ public class TransferStatusTests
         var updated = await db.Transfers.FindAsync(transfer.Id);
         Assert.Equal(TransferStatus.Completed, updated!.Status);
         Assert.Equal("ACH-SETTLED-001", updated.ExternalReferenceId);
+        var tx = await db.Transactions.FirstAsync();
+        Assert.Equal(1, await db.Transactions.CountAsync());
+        Assert.Equal(TransactionStatus.Completed, tx.Status);
     }
 
     [Fact]

@@ -470,17 +470,27 @@ public class TransferService(
             transfer.CompletedAt = DateTime.UtcNow;
             transfer.ExternalReferenceId = referenceId ?? transfer.ExternalReferenceId;
 
-            db.Transactions.Add(new Transaction
+            var existingDebit = await db.Transactions.FirstOrDefaultAsync(t =>
+                t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit);
+
+            if (existingDebit is not null)
             {
-                Id = Guid.NewGuid(),
-                AccountId = transfer.FromAccountId,
-                Amount = transfer.Amount,
-                Type = TransactionType.Debit,
-                Status = TransactionStatus.Completed,
-                Description = transfer.Description ?? $"{transfer.Channel} transfer",
-                ReferenceId = transfer.Id.ToString(),
-                CreatedAt = DateTime.UtcNow
-            });
+                existingDebit.Status = TransactionStatus.Completed;
+            }
+            else
+            {
+                db.Transactions.Add(new Transaction
+                {
+                    Id = Guid.NewGuid(),
+                    AccountId = transfer.FromAccountId,
+                    Amount = transfer.Amount,
+                    Type = TransactionType.Debit,
+                    Status = TransactionStatus.Completed,
+                    Description = transfer.Description ?? $"{transfer.Channel} transfer",
+                    ReferenceId = transfer.Id.ToString(),
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
             if (transfer.ToAccountId is not null)
             {
