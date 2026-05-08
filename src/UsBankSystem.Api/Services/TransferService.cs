@@ -501,7 +501,7 @@ public class TransferService(
 
         await db.SaveChangesAsync();
 
-        // Fire-and-forget — SWIFT settlement takes 1-5 business days, status comes via webhook
+        // SWIFT settlement takes 1-5 business days — final status comes via webhook
         var gatewayResult = await swiftGateway.SendAsync(new(
             TransferId: transfer.Id,
             Amount: transfer.Amount,
