@@ -56,9 +56,14 @@ public class CreateFedNowTransferTests
             { BaseAddress = new Uri("http://localhost:6003") },
             NullLogger<FedNowGateway>.Instance);
 
+    private static SwiftGateway CreateSwiftGateway() =>
+        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+            { BaseAddress = new Uri("http://localhost:6004") },
+            NullLogger<SwiftGateway>.Instance);
+
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode fedNowStatus = HttpStatusCode.OK)
     {
-        var service = new TransferService(db, CreateAchGateway(), CreateRtpGateway(), CreateFedNowGateway(fedNowStatus), CreatePaymentConfig());
+        var service = new TransferService(db, CreateAchGateway(), CreateRtpGateway(), CreateFedNowGateway(fedNowStatus), CreateSwiftGateway(), CreatePaymentConfig());
         var controller = new TransfersController(service, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {

@@ -5,6 +5,7 @@ using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Core.Domain.Common;
+using UsBankSystem.Core.Domain.Swift;
 using UsBankSystem.Core.Domain.Transactions;
 using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Core.Entities;
@@ -18,6 +19,7 @@ public class TransferService(
 	AchGateway achGateway,
 	RtpGateway rtpGateway,
 	FedNowGateway fedNowGateway,
+	SwiftGateway swiftGateway,
 	IOptions<PaymentSessionConfig> paymentConfig)
 {
     public async Task<TransferResponse> CreateInternalAsync(Guid userId, CreateInternalTransferRequest request)
@@ -451,6 +453,99 @@ public class TransferService(
             .ToListAsync();
     }
 
+    public async Task<TransferResponse> CreateSwiftAsync(Guid userId, CreateSwiftTransferRequest request)
+    {
+        SwiftRequestValidator.Validate(request.Iban, request.Bic, request.ChargeBearer, request.Currency, request.ValueDate);
+
+        var valueDate = SwiftRequestValidator.ResolveValueDate(request.ValueDate);
+
+        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
+            ?? throw new KeyNotFoundException("Source account not found or inactive");
+
+        var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
+        if (availableBalance < request.Amount)
+            throw new ArgumentException("Insufficient funds");
+
+        var todaySwiftTotal = await GetTodayTransferTotalByChannelAsync(fromAccount.Id, TransferChannel.Swift);
+        SwiftRequestValidator.ValidateDailyLimit(todaySwiftTotal, request.Amount, paymentConfig.Value.Swift.DailyLimitPerAccount);
+
+        fromAccount.ReservedBalance += request.Amount;
+
+        var transfer = new Transfer
+        {
+            Id = Guid.NewGuid(),
+            FromAccountId = fromAccount.Id,
+            ToAccountId = null,
+            Amount = request.Amount,
+            Currency = request.Currency.ToUpperInvariant(),
+            Channel = TransferChannel.Swift,
+            Status = TransferStatus.Pending,
+            Description = request.Description,
+            RequiresApproval = false,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        db.Transfers.Add(transfer);
+
+        db.Transactions.Add(new Transaction
+        {
+            Id = Guid.NewGuid(),
+            AccountId = fromAccount.Id,
+            Amount = request.Amount,
+            Type = TransactionType.Debit,
+            Status = TransactionStatus.Pending,
+            Description = request.Description ?? "SWIFT transfer",
+            ReferenceId = transfer.Id.ToString(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
+        // SWIFT settlement takes 1-5 business days — final status comes via webhook
+        var gatewayResult = await swiftGateway.SendAsync(new(
+            TransferId: transfer.Id,
+            Amount: transfer.Amount,
+            Currency: transfer.Currency,
+            Description: transfer.Description,
+            Metadata: new Dictionary<string, string>
+            {
+                ["iban"] = request.Iban,
+                ["bic"] = request.Bic,
+                ["beneficiaryName"] = request.BeneficiaryName,
+                ["beneficiaryAddress"] = request.BeneficiaryAddress ?? "",
+                ["chargeBearer"] = request.ChargeBearer,
+                ["valueDate"] = valueDate.ToString("yyyyMMdd"),
+                ["remittanceInfo"] = request.RemittanceInfo ?? ""
+            }
+        ));
+
+        if (!gatewayResult.Success)
+        {
+            transfer.Status = TransferStatus.Failed;
+            fromAccount.ReservedBalance -= request.Amount;
+            await db.SaveChangesAsync();
+            throw new ArgumentException(gatewayResult.Error ?? "SWIFT gateway error");
+        }
+
+        transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
+        await db.SaveChangesAsync();
+
+        return new TransferResponse
+        {
+            Id = transfer.Id,
+            FromAccountId = transfer.FromAccountId,
+            ToAccountId = transfer.ToAccountId,
+            Amount = transfer.Amount,
+            Currency = transfer.Currency,
+            Channel = transfer.Channel,
+            Status = transfer.Status,
+            Description = transfer.Description,
+            CreatedAt = transfer.CreatedAt,
+            CompletedAt = transfer.CompletedAt,
+            RequiresApproval = transfer.RequiresApproval
+        };
+    }
+
     public async Task<TransferStatusResponse> GetStatusAsync(Guid userId, Guid transferId)
     {
         var transfer = await db.Transfers
@@ -555,6 +650,18 @@ public class TransferService(
         var today = DateTime.UtcNow.Date;
         return await db.Transfers
             .Where(t => t.FromAccountId == accountId
+                        && t.CreatedAt >= today
+                        && t.Status != TransferStatus.Rejected
+                        && t.Status != TransferStatus.Failed)
+            .SumAsync(t => t.Amount);
+    }
+
+    private async Task<decimal> GetTodayTransferTotalByChannelAsync(Guid accountId, string channel)
+    {
+        var today = DateTime.UtcNow.Date;
+        return await db.Transfers
+            .Where(t => t.FromAccountId == accountId
+                        && t.Channel == channel
                         && t.CreatedAt >= today
                         && t.Status != TransferStatus.Rejected
                         && t.Status != TransferStatus.Failed)

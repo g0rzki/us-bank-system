@@ -59,7 +59,11 @@ public class CreateAchTransferTests
         	new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
             	{ BaseAddress = new Uri("http://localhost:6003") },
         	NullLogger<FedNowGateway>.Instance);
-        var service = new TransferService(db, gateway, rtpGateway, fedNowGateway, CreatePaymentConfig());
+        var swiftGateway = new SwiftGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+                { BaseAddress = new Uri("http://localhost:6004") },
+            NullLogger<SwiftGateway>.Instance);
+        var service = new TransferService(db, gateway, rtpGateway, fedNowGateway, swiftGateway, CreatePaymentConfig());
         var controller = new TransfersController(service, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {

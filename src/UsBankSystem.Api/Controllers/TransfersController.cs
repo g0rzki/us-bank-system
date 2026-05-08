@@ -69,6 +69,18 @@ public class TransfersController(TransferService transferService, IConfiguration
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
+    [HttpPost("swift")]
+    [ProducesResponseType(typeof(TransferResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreateSwift([FromBody] CreateSwiftTransferRequest request)
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        var result = await transferService.CreateSwiftAsync(userId, request);
+        return StatusCode(StatusCodes.Status201Created, result);
+    }
+
     [HttpGet("{id:guid}/status")]
     [ProducesResponseType(typeof(TransferStatusResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

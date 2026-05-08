@@ -52,9 +52,14 @@ public class CreateInternalTransferTests
     	{
         	Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
         	Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
- 			FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
+ 			FedNow = new TimeoutConfig { TimeoutSeconds = 10 },
+            Swift = new SwiftConfig { TimeoutSeconds = 10 }
     	});
-    	var service = new TransferService(db, achGateway, rtpGateway, fedNowGateway, paymentConfig);
+        var swiftGateway = new SwiftGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+                { BaseAddress = new Uri("http://localhost:6004") },
+            NullLogger<SwiftGateway>.Instance);
+    	var service = new TransferService(db, achGateway, rtpGateway, fedNowGateway, swiftGateway, paymentConfig);
     	var controller = new TransfersController(service, CreateConfig());
     	controller.ControllerContext = new ControllerContext
     	{
