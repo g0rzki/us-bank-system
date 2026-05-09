@@ -182,6 +182,7 @@ POSTGRES_USER=twoj_user     # dowolna nazwa użytkownika bazy
 POSTGRES_PASSWORD=twoje_haslo
 POSTGRES_PORT=5433          # port na hoście (5433 jeśli lokalny postgres zajmuje 5432)
 JWT_SECRET=min_32_znaki     # dowolny ciąg min. 32 znaków
+WEBHOOK_SECRET=dowolny_sekret  # używany przez mock gateway do wysyłania webhooków
 CORS_ORIGIN=http://localhost:3000
 INTEGRATIONS_ACH_URL=http://localhost:6001
 INTEGRATIONS_RTP_URL=http://localhost:6002
@@ -218,6 +219,8 @@ docker compose up --build
 
 Pierwsze uruchomienie pobiera obrazy i buduje kontenery — może potrwać kilka minut.
 
+> `docker compose up` odpala też mock gateway automatycznie jako osobny serwis — nie trzeba nic robić ręcznie.
+
 Aplikacja dostępna pod:
 
 | Serwis | URL                           |
@@ -247,9 +250,12 @@ docker compose down -v
 us-bank-system/
 ├── src/
 │   ├── UsBankSystem.Api/             # ASP.NET Core Web API
-│   │   └── payment-config.json       # konfiguracja sesji płatności
+│   │   └── payment-config.json       # konfiguracja sesji płatności (timeouty, okna batch)
 │   ├── UsBankSystem.Core/            # Domain entities, interfaces
-│   └── UsBankSystem.Infrastructure/  # EF Core, repositories
+│   ├── UsBankSystem.Infrastructure/  # EF Core, repositories
+│   ├── UsBankSystem.MockGateways/    # Mock stuby ACH/RTP/FedNow/SWIFT (porty 6001-6004)
+│   ├── UsBankSystem.Tests/           # Testy API
+│   └── UsBankSystem.MockGateways.Tests/ # Testy mock stubów
 ├── frontend/                         # React + Vite SPA
 ├── docker-compose.yaml
 ├── .env.example
@@ -306,7 +312,22 @@ INTEGRATIONS_CARDS_URL=http://cards-module
 INTEGRATIONS_BLIK_URL=http://blik-module
 ```
 
-W środowisku deweloperskim każda integracja działa przez lokalny mock stub. Zamiana na produkcyjny moduł = zmiana URL w `.env`.
+W środowisku deweloperskim każda integracja działa przez **mock stub** (`UsBankSystem.MockGateways`) — osobny serwis który symuluje realistyczne zachowanie każdego kanału:
+
+| Kanał | Port | Zachowanie |
+|---|---|---|
+| ACH | 6001 | Odpowiada natychmiast, po skonfigurowanym czasie wysyła webhook do API z wynikiem (jak prawdziwy batch) |
+| RTP | 6002 | Czeka kilka sekund i odpowiada synchronicznie `Completed` (real-time rail) |
+| FedNow | 6003 | Tak samo jak RTP |
+| SWIFT | 6004 | Odpowiada natychmiast, webhook po dłuższym czasie (settlement 1-5 dni roboczych) |
+
+Czasy opóźnień są brane z `payment-config.json`.
+
+Żeby przełączyć się z mocka na prawdziwy moduł — zmień odpowiedni URL w `.env` na adres modułu innej grupy, np.:
+
+```env
+INTEGRATIONS_ACH_URL=http://adres-modulu-ach
+```
 
 ---
 
