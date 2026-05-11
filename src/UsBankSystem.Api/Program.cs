@@ -8,6 +8,8 @@ using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Middleware;
 using UsBankSystem.Infrastructure.Persistence;
 
+DotNetEnv.Env.TraversePath().Load();
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
@@ -25,7 +27,7 @@ builder.Configuration.AddJsonFile("payment-config.json", optional: false, reload
 builder.Services.Configure<PaymentSessionConfig>(
     builder.Configuration.GetSection("PaymentSessions"));
 
-// Payment gateways
+// Payment gateways — adresy z konfiguracji (env var lub .env); domyślnie mock stubs na localhost
 builder.Services.AddHttpClient<AchGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:AchUrl"] ?? "http://localhost:6001"));
 builder.Services.AddHttpClient<RtpGateway>(c =>
