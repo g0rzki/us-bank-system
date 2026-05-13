@@ -11,6 +11,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Transfer> Transfers => Set<Transfer>();
     public DbSet<Card> Cards => Set<Card>();
     public DbSet<BlikCode> BlikCodes => Set<BlikCode>();
+    public DbSet<JuniorAccount> JuniorAccounts => Set<JuniorAccount>(); 
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -89,6 +90,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany(a => a.BlikCodes)
                 .HasForeignKey(b => b.AccountId);
             e.HasIndex(b => new { b.AccountId, b.ExpiresAt });
+        });
+    
+        modelBuilder.Entity<JuniorAccount>(e =>
+        {
+            e.HasKey(j => j.Id);
+            e.HasOne(j => j.Account)
+                .WithOne()
+                .HasForeignKey<JuniorAccount>(j => j.AccountId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(j => j.ParentAccount)
+                .WithMany()
+                .HasForeignKey(j => j.ParentAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(j => j.AccountId).IsUnique();
+            e.HasIndex(j => j.ParentAccountId);
         });
     }
 }
