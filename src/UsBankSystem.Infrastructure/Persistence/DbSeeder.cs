@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Core.Entities;
+using Transfer = UsBankSystem.Core.Entities.Transfer;
 
 namespace UsBankSystem.Infrastructure.Persistence;
 
@@ -347,21 +349,38 @@ public static class DbSeeder
 
         context.Cards.AddRange(juniorCards);
 
-        var pendingTransfer = new Transfer
+        // Pending approval transfers (from junior accounts, awaiting parent approval)
+        var pendingApprovalTransfers = new List<Transfer>
         {
-            Id = Guid.Parse("aaaa9999-1111-1111-1111-111111111111"),
-            FromAccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"),
-            ToAccountId = account2Checking.Id,
-            Amount = 30.00m,
-            Currency = "USD",
-            Channel = "internal",
-            Status = "pending_approval",
-            Description = "Pocket money",
-            RequiresApproval = true,
-            CreatedAt = DateTime.UtcNow.AddHours(-2)
+            new()
+            {
+                Id = Guid.Parse("aaaa9999-1111-1111-1111-111111111111"),
+                FromAccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"),
+                ToAccountId = account2Checking.Id,
+                Amount = 30.00m,
+                Currency = "USD",
+                Channel = "internal",
+                Status = TransferStatus.PendingApproval,
+                Description = "Pocket money",
+                RequiresApproval = true,
+                CreatedAt = DateTime.UtcNow.AddHours(-2)
+            },
+            new()
+            {
+                Id = Guid.Parse("aaaa9999-2222-2222-2222-222222222222"),
+                FromAccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"),
+                ToAccountId = account1Savings.Id,
+                Amount = 15.00m,
+                Currency = "USD",
+                Channel = "internal",
+                Status = TransferStatus.PendingApproval,
+                Description = "Savings contribution",
+                RequiresApproval = true,
+                CreatedAt = DateTime.UtcNow.AddHours(-1)
+            }
         };
 
-        context.Transfers.Add(pendingTransfer);
+        context.Transfers.AddRange(pendingApprovalTransfers);
 
         await context.SaveChangesAsync();
     }
