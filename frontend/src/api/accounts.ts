@@ -44,3 +44,21 @@ export async function createAccount(type: string): Promise<Account> {
     const res = await client.post<Account>('/accounts', { type, currency: 'USD' });
     return res.data;
 }
+
+export interface JuniorAccount {
+    juniorAccountId: string;
+    accountId: string;
+    accountNumber: string;
+    balance: number;
+    currency: string;
+    status: string;
+    dateOfBirth: string;
+    cardDailyLimit: number | null;
+    cardMonthlyLimit: number | null;
+    createdAt: string;
+}
+
+export async function getJuniorAccounts(parentAccountId: string): Promise<JuniorAccount[]> {
+    const res = await client.get<JuniorAccount[]>(`/accounts/${parentAccountId}/junior-accounts`);
+    return res.data;
+}

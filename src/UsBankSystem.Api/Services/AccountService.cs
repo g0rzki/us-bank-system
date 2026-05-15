@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Core.Domain.Accounts;
+using UsBankSystem.Core.Domain.Cards;
 using UsBankSystem.Core.Domain.Common;
 using Account = UsBankSystem.Core.Entities.Account;
 using UsBankSystem.Infrastructure.Persistence;
@@ -145,6 +146,40 @@ public class AccountService(AppDbContext db)
             Total = total,
             TotalPages = (int)Math.Ceiling((double)total / pageSize)
         };
+    }
+
+    public async Task<List<JuniorAccountResponse>> GetJuniorAccountsAsync(Guid userId, Guid parentAccountId)
+    {
+        var parentAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == parentAccountId)
+            ?? throw new KeyNotFoundException("Account not found");
+
+        if (parentAccount.UserId != userId)
+            throw new UnauthorizedAccessException("Access denied");
+        return await db.JuniorAccounts
+            .Include(j => j.Account)
+            .ThenInclude(a => a.Cards)
+            .Where(j => j.ParentAccountId == parentAccountId)
+            .OrderBy(j => j.CreatedAt)
+            .Select(j => new JuniorAccountResponse
+            {
+                JuniorAccountId = j.Id,
+                AccountId = j.AccountId,
+                AccountNumber = j.Account.AccountNumber,
+                Balance = j.Account.Balance,
+                Currency = j.Account.Currency,
+                Status = j.Account.Status,
+                DateOfBirth = j.DateOfBirth,
+                CardDailyLimit = j.Account.Cards
+                    .Where(c => c.Type == CardType.Prepaid && c.Status == CardStatus.Active)
+                    .Select(c => c.DailyLimit)
+                    .FirstOrDefault(),
+                CardMonthlyLimit = j.Account.Cards
+                    .Where(c => c.Type == CardType.Prepaid && c.Status == CardStatus.Active)
+                    .Select(c => c.MonthlyLimit)
+                    .FirstOrDefault(),
+                CreatedAt = j.CreatedAt
+            })
+            .ToListAsync();
     }
 
     private static async Task<string> GenerateAccountNumberAsync(AppDbContext db)

@@ -310,6 +310,59 @@ public static class DbSeeder
 
         context.BlikCodes.AddRange(blikCodes);
 
+        // Junior accounts — john.doe ma 3, jane.smith ma 3, bob.wilson ma 0
+        var juniorAccounts = new List<Account>
+        {
+            new() { Id = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), UserId = user1.Id, AccountNumber = "4000000001", Type = "checking", Balance = 250.00m, ReservedBalance = 30.00m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) },
+            new() { Id = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), UserId = user1.Id, AccountNumber = "4000000002", Type = "checking", Balance = 80.50m,  ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) },
+            new() { Id = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), UserId = user1.Id, AccountNumber = "4000000003", Type = "checking", Balance = 510.00m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-15) },
+            new() { Id = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), UserId = user2.Id, AccountNumber = "4000000004", Type = "checking", Balance = 120.00m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) },
+            new() { Id = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), UserId = user2.Id, AccountNumber = "4000000005", Type = "checking", Balance = 340.75m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) },
+            new() { Id = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), UserId = user2.Id, AccountNumber = "4000000006", Type = "checking", Balance = 60.00m,  ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-10) },
+        };
+
+        context.Accounts.AddRange(juniorAccounts);
+
+        var juniorLinks = new List<JuniorAccount>
+        {
+            new() { Id = Guid.Parse("eeee5555-1111-1111-1111-111111111111"), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), ParentAccountId = account1Checking.Id, DateOfBirth = new DateOnly(2015, 6, 15),  CreatedAt = DateTime.UtcNow.AddMonths(-2) },
+            new() { Id = Guid.Parse("eeee5555-2222-2222-2222-222222222222"), AccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), ParentAccountId = account1Checking.Id, DateOfBirth = new DateOnly(2013, 3, 22),  CreatedAt = DateTime.UtcNow.AddMonths(-1) },
+            new() { Id = Guid.Parse("eeee5555-3333-3333-3333-333333333333"), AccountId = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), ParentAccountId = account1Checking.Id, DateOfBirth = new DateOnly(2016, 11, 5),  CreatedAt = DateTime.UtcNow.AddDays(-15) },
+            new() { Id = Guid.Parse("eeee5555-4444-4444-4444-444444444444"), AccountId = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2014, 8, 30),  CreatedAt = DateTime.UtcNow.AddMonths(-2) },
+            new() { Id = Guid.Parse("eeee5555-5555-5555-5555-555555555555"), AccountId = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2017, 1, 12),  CreatedAt = DateTime.UtcNow.AddMonths(-1) },
+            new() { Id = Guid.Parse("eeee5555-6666-6666-6666-666666666666"), AccountId = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2012, 5, 19),  CreatedAt = DateTime.UtcNow.AddDays(-10) },
+        };
+
+        context.JuniorAccounts.AddRange(juniorLinks);
+
+        var juniorCards = new List<Card>
+        {
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), Last4 = "9001", Type = "prepaid", Status = "active", DailyLimit = 50.00m,  MonthlyLimit = 300.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddMonths(-2).AddDays(1) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), Last4 = "9002", Type = "prepaid", Status = "active", DailyLimit = 30.00m,  MonthlyLimit = 150.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddMonths(-1).AddDays(1) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), Last4 = "9003", Type = "prepaid", Status = "active", DailyLimit = 100.00m, MonthlyLimit = 500.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddDays(-14) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), Last4 = "9004", Type = "prepaid", Status = "active", DailyLimit = 40.00m,  MonthlyLimit = 200.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddMonths(-2).AddDays(1) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), Last4 = "9005", Type = "prepaid", Status = "active", DailyLimit = 25.00m,  MonthlyLimit = 100.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddMonths(-1).AddDays(1) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), Last4 = "9006", Type = "prepaid", Status = "active", DailyLimit = null,    MonthlyLimit = null,    ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddDays(-9) },
+        };
+
+        context.Cards.AddRange(juniorCards);
+
+        var pendingTransfer = new Transfer
+        {
+            Id = Guid.Parse("aaaa9999-1111-1111-1111-111111111111"),
+            FromAccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"),
+            ToAccountId = account2Checking.Id,
+            Amount = 30.00m,
+            Currency = "USD",
+            Channel = "internal",
+            Status = "pending_approval",
+            Description = "Pocket money",
+            RequiresApproval = true,
+            CreatedAt = DateTime.UtcNow.AddHours(-2)
+        };
+
+        context.Transfers.Add(pendingTransfer);
+
         await context.SaveChangesAsync();
     }
 

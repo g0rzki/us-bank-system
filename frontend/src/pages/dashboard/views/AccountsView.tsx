@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { createAccount } from '../../../api/accounts';
-import type { Account } from '../../../api/accounts';
+import { useState, useEffect } from 'react';
+import { createAccount, getJuniorAccounts } from '../../../api/accounts';
+import type { Account, JuniorAccount } from '../../../api/accounts';
 import AccountCard from '../components/AccountCard';
+import JuniorAccountList from '../components/JuniorAccountList';
 
 export default function AccountsView({ accounts, onAccountCreated }: {
     accounts: Account[];
@@ -11,6 +12,16 @@ export default function AccountsView({ accounts, onAccountCreated }: {
     const [type, setType] = useState<'checking' | 'savings'>('checking');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [juniorAccounts, setJuniorAccounts] = useState<JuniorAccount[]>([]);
+    const [juniorLoading, setJuniorLoading] = useState(false);
+
+    useEffect(() => {
+        if (accounts.length === 0) return;
+        setJuniorLoading(true);
+        Promise.all(accounts.map(acc => getJuniorAccounts(acc.id)))
+            .then(results => setJuniorAccounts(results.flat()))
+            .finally(() => setJuniorLoading(false));
+    }, [accounts]);
 
     const handleSubmit = async () => {
         setLoading(true);
@@ -36,6 +47,19 @@ export default function AccountsView({ accounts, onAccountCreated }: {
                     {accounts.map(acc => <AccountCard key={acc.id} account={acc} detailed />)}
                 </div>
             )}
+
+            <div className="db-section db-mt">
+                <div className="db-section-header">
+                    <h2>Junior accounts</h2>
+                </div>
+                {juniorLoading ? (
+                    <div className="db-loading">Loading...</div>
+                ) : juniorAccounts.length === 0 ? (
+                    <p className="db-empty">No junior accounts linked to your accounts.</p>
+                ) : (
+                    <JuniorAccountList accounts={juniorAccounts} />
+                )}
+            </div>
 
             {showForm ? (
                 <div className="db-form-card db-mt">
