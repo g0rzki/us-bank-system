@@ -429,6 +429,30 @@ public class TransferService(
     	};
 	}
 
+    public async Task<List<PendingApprovalTransferResponse>> GetPendingApprovalAsync(Guid userId)
+    {
+        return await db.Transfers
+            .Where(t =>
+                t.Status == TransferStatus.PendingApproval &&
+                db.JuniorAccounts.Any(j =>
+                    j.AccountId == t.FromAccountId &&
+                    j.ParentAccount.UserId == userId))
+            .OrderBy(t => t.CreatedAt)
+            .Select(t => new PendingApprovalTransferResponse
+            {
+                Id = t.Id,
+                FromAccountId = t.FromAccountId,
+                FromAccountNumber = t.FromAccount.AccountNumber,
+                ToAccountId = t.ToAccountId,
+                Amount = t.Amount,
+                Currency = t.Currency,
+                Channel = t.Channel,
+                Description = t.Description,
+                CreatedAt = t.CreatedAt
+            })
+            .ToListAsync();
+    }
+
     public async Task<List<TransferResponse>> GetAllAsync(Guid userId)
     {
         return await db.Transfers

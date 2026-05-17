@@ -1,16 +1,27 @@
 import { useState, useEffect } from 'react';
-import { getTransfers, getTransferStatus } from '../../../api/transfers';
-import type { Transfer, TransferStatus } from '../../../api/transfers';
+import { getTransfers, getTransferStatus, getPendingApprovalTransfers } from '../../../api/transfers';
+import type { Transfer, TransferStatus, PendingApprovalTransfer } from '../../../api/transfers';
 import TransferStatusCard from '../components/TransferStatusCard';
+import PendingApprovalList from '../components/PendingApprovalList';
 
 export default function TransfersView() {
     const [transfers, setTransfers] = useState<Transfer[]>([]);
+    const [pendingApproval, setPendingApproval] = useState<PendingApprovalTransfer[]>([]);
     const [selected, setSelected] = useState<TransferStatus | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [detailLoading, setDetailLoading] = useState(false);
 
     useEffect(() => {
-        getTransfers().then(setTransfers).finally(() => setLoading(false));
+        Promise.all([
+            getTransfers(),
+            getPendingApprovalTransfers(),
+        ]).then(([all, pending]) => {
+            setTransfers(all);
+            setPendingApproval(pending);
+        }).catch(() => {
+            setError('Failed to load transfers. Please try again.');
+        }).finally(() => setLoading(false));
     }, []);
 
     const handleSelect = async (id: string) => {
@@ -27,6 +38,19 @@ export default function TransfersView() {
     return (
         <div className="db-view">
             <h1 className="db-view-title">Transfers</h1>
+
+            {error && <p className="db-error">{error}</p>}
+
+            {pendingApproval.length > 0 && (
+                <div className="db-section db-mb">
+                    <h2 className="db-section-title">Pending approval</h2>
+                    {loading ? (
+                        <div className="db-loading">Loading...</div>
+                    ) : (
+                        <PendingApprovalList transfers={pendingApproval} />
+                    )}
+                </div>
+            )}
 
             <div className="db-section db-mb">
                 <h2 className="db-section-title">Transfer history</h2>

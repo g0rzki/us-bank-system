@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Core.Entities;
+using Transfer = UsBankSystem.Core.Entities.Transfer;
 
 namespace UsBankSystem.Infrastructure.Persistence;
 
@@ -330,7 +332,7 @@ public static class DbSeeder
             new() { Id = Guid.Parse("eeee5555-3333-3333-3333-333333333333"), AccountId = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), ParentAccountId = account1Checking.Id, DateOfBirth = new DateOnly(2016, 11, 5),  CreatedAt = DateTime.UtcNow.AddDays(-15) },
             new() { Id = Guid.Parse("eeee5555-4444-4444-4444-444444444444"), AccountId = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2014, 8, 30),  CreatedAt = DateTime.UtcNow.AddMonths(-2) },
             new() { Id = Guid.Parse("eeee5555-5555-5555-5555-555555555555"), AccountId = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2017, 1, 12),  CreatedAt = DateTime.UtcNow.AddMonths(-1) },
-            new() { Id = Guid.Parse("eeee5555-6666-6666-6666-666666666666"), AccountId = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2012, 5, 19),  CreatedAt = DateTime.UtcNow.AddDays(-10) },
+            new() { Id = Guid.Parse("eeee5555-6666-6666-6666-666666666666"), AccountId = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2014, 5, 19),  CreatedAt = DateTime.UtcNow.AddDays(-10) },
         };
 
         context.JuniorAccounts.AddRange(juniorLinks);
@@ -347,21 +349,38 @@ public static class DbSeeder
 
         context.Cards.AddRange(juniorCards);
 
-        var pendingTransfer = new Transfer
+        // Pending approval transfers (from junior accounts, awaiting parent approval)
+        var pendingApprovalTransfers = new List<Transfer>
         {
-            Id = Guid.Parse("aaaa9999-1111-1111-1111-111111111111"),
-            FromAccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"),
-            ToAccountId = account2Checking.Id,
-            Amount = 30.00m,
-            Currency = "USD",
-            Channel = "internal",
-            Status = "pending_approval",
-            Description = "Pocket money",
-            RequiresApproval = true,
-            CreatedAt = DateTime.UtcNow.AddHours(-2)
+            new()
+            {
+                Id = Guid.Parse("aaaa9999-1111-1111-1111-111111111111"),
+                FromAccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"),
+                ToAccountId = account2Checking.Id,
+                Amount = 30.00m,
+                Currency = "USD",
+                Channel = "internal",
+                Status = TransferStatus.PendingApproval,
+                Description = "Pocket money",
+                RequiresApproval = true,
+                CreatedAt = DateTime.UtcNow.AddHours(-2)
+            },
+            new()
+            {
+                Id = Guid.Parse("aaaa9999-2222-2222-2222-222222222222"),
+                FromAccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"),
+                ToAccountId = account1Savings.Id,
+                Amount = 15.00m,
+                Currency = "USD",
+                Channel = "internal",
+                Status = TransferStatus.PendingApproval,
+                Description = "Savings contribution",
+                RequiresApproval = true,
+                CreatedAt = DateTime.UtcNow.AddHours(-1)
+            }
         };
 
-        context.Transfers.Add(pendingTransfer);
+        context.Transfers.AddRange(pendingApprovalTransfers);
 
         await context.SaveChangesAsync();
     }

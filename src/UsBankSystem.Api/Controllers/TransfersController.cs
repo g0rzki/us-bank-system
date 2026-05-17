@@ -12,6 +12,15 @@ namespace UsBankSystem.Api.Controllers;
 [Tags("Transfers")]
 public class TransfersController(TransferService transferService, IConfiguration configuration) : ControllerBase
 {
+    [HttpGet("pending-approval")]
+    [ProducesResponseType(typeof(List<PendingApprovalTransferResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetPendingApproval()
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        return Ok(await transferService.GetPendingApprovalAsync(userId));
+    }
+
     [HttpGet]
     [ProducesResponseType(typeof(List<TransferResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
