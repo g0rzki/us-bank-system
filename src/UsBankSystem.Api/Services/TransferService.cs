@@ -37,7 +37,7 @@ public class TransferService(
             throw new ArgumentException("Cannot transfer to the same account");
 
         // Sprawdź czy konto źródłowe to konto junior
-        var isJuniorAccount = false; // TODO: US-30 - sprawdzenie konta junior
+        var isJuniorAccount = await db.JuniorAccounts.AnyAsync(j => j.AccountId == fromAccount.Id);
 
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
@@ -665,8 +665,11 @@ public class TransferService(
 
     private async Task<decimal?> GetDailyTransferLimitAsync(Guid accountId)
     {
-        // TODO: US-30 — podpiąć limit z JuniorAccount/Card
-        return await Task.FromResult<decimal?>(null);
+        var prepaidCard = await db.Cards
+            .Where(c => c.AccountId == accountId && c.Type == "prepaid" && c.Status == "active")
+            .FirstOrDefaultAsync();
+
+        return prepaidCard?.DailyLimit;
     }
 
     private async Task<decimal> GetTodayTransferTotalAsync(Guid accountId)
