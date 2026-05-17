@@ -344,6 +344,12 @@
     margin-top: var(--spacing-xs);
 }
 
+.db-transfer-settlement {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    margin-top: var(--spacing-xs);
+}
+
 /* History tabs */
 .db-account-tabs {
     display: flex;

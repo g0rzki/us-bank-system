@@ -60,3 +60,74 @@ export async function getTransferStatus(transferId: string): Promise<TransferSta
     const res = await client.get<TransferStatus>(`/transfers/${transferId}/status`);
     return res.data;
 }
+
+export interface CreateInternalTransferRequest {
+    fromAccountId: string;
+    toAccountId: string;
+    amount: number;
+    currency: string;
+    description?: string;
+}
+
+export interface CreateAchTransferRequest {
+    fromAccountId: string;
+    toRoutingNumber: string;
+    toAccountNumber: string;
+    amount: number;
+    currency: string;
+    description?: string;
+}
+
+export interface CreateRtpTransferRequest {
+    fromAccountId: string;
+    toAccountNumber: string;
+    amount: number;
+    currency: string;
+    description?: string;
+}
+
+export interface CreateFedNowTransferRequest {
+    fromAccountId: string;
+    toAccountNumber: string;
+    amount: number;
+    currency: string;
+    description?: string;
+}
+
+export interface CreateSwiftTransferRequest {
+    fromAccountId: string;
+    iban: string;
+    bic: string;
+    beneficiaryName: string;
+    beneficiaryAddress?: string;
+    amount: number;
+    currency: string;
+    chargeBearer: string;
+    remittanceInfo?: string;
+    description?: string;
+}
+
+export async function createInternalTransfer(req: CreateInternalTransferRequest): Promise<Transfer> {
+    const res = await client.post<Transfer>('/transfers/internal', req);
+    return res.data;
+}
+
+export async function createAchTransfer(req: CreateAchTransferRequest): Promise<Transfer> {
+    const res = await client.post<Transfer>('/transfers/ach', req);
+    return res.data;
+}
+
+export async function createRtpTransfer(req: CreateRtpTransferRequest): Promise<Transfer> {
+    const res = await client.post<Transfer>('/transfers/rtp', req);
+    return res.data;
+}
+
+export async function createFedNowTransfer(req: CreateFedNowTransferRequest): Promise<Transfer> {
+    const res = await client.post<Transfer>('/transfers/fednow', req);
+    return res.data;
+}
+
+export async function createSwiftTransfer(req: CreateSwiftTransferRequest): Promise<Transfer> {
+    const res = await client.post<Transfer>('/transfers/swift', req);
+    return res.data;
+}

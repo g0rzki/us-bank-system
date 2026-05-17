@@ -219,8 +219,8 @@ public class TransferService(
     	var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
         	?? throw new KeyNotFoundException("Source account not found or inactive");
 
-    	var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active)
-        	?? throw new KeyNotFoundException("Destination account not found or inactive");
+        var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == request.ToAccountNumber && a.Status == AccountStatus.Active)
+                        ?? throw new KeyNotFoundException("Destination account not found or inactive");
 
     	if (fromAccount.Id == toAccount.Id)
         	throw new ArgumentException("Cannot transfer to the same account");
@@ -328,8 +328,8 @@ public class TransferService(
     	var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
         	?? throw new KeyNotFoundException("Source account not found or inactive");
 
-    	var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active)
-        	?? throw new KeyNotFoundException("Destination account not found or inactive");
+        var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == request.ToAccountNumber && a.Status == AccountStatus.Active)
+                        ?? throw new KeyNotFoundException("Destination account not found or inactive");
 
     	if (fromAccount.Id == toAccount.Id)
         	throw new ArgumentException("Cannot transfer to the same account");

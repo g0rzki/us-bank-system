@@ -30,8 +30,8 @@ export default function AccountsView({ accounts, onAccountCreated }: {
             const account = await createAccount(type);
             onAccountCreated(account);
             setShowForm(false);
-        } catch {
-            setError('Failed to create account. Please try again.');
+        } catch (e: any) {
+            setError(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to create account. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -93,7 +93,7 @@ export default function AccountsView({ accounts, onAccountCreated }: {
                         </button>
                     </div>
                 </div>
-            ) : (
+            ) : accounts.length >= 5 ? null : (
                 <button className="db-btn-primary db-mt" onClick={() => setShowForm(true)}>
                     + Open new account
                 </button>
