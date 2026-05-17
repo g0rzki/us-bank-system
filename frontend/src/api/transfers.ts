@@ -41,6 +41,16 @@ export async function getPendingApprovalTransfers(): Promise<PendingApprovalTran
     return res.data;
 }
 
+export async function approveTransfer(transferId: string): Promise<Transfer> {
+    const res = await client.post<Transfer>(`/transfers/${transferId}/approve`);
+    return res.data;
+}
+
+export async function rejectTransfer(transferId: string): Promise<Transfer> {
+    const res = await client.post<Transfer>(`/transfers/${transferId}/reject`);
+    return res.data;
+}
+
 export async function getTransfers(): Promise<Transfer[]> {
     const res = await client.get<Transfer[]>('/transfers');
     return res.data;
