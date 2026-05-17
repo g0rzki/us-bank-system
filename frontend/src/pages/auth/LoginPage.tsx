@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { login } from '../../api/auth';
 import { validateLoginForm } from '../../utils/validators';
@@ -17,6 +17,25 @@ export default function LoginPage() {
     const [password, setPassword] = useState('');
     const [errors, setErrors] = useState<Errors>({});
     const [loading, setLoading] = useState(false);
+
+    // TODO: REMOVE BEFORE PRODUCTION — dev autofill via 5x Space
+    const spaceCount = useRef(0);
+    const spaceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        function handleKeyDown(e: KeyboardEvent) {
+            if (e.code !== 'Space') { spaceCount.current = 0; return; }
+            spaceCount.current += 1;
+            if (spaceTimer.current) clearTimeout(spaceTimer.current);
+            spaceTimer.current = setTimeout(() => { spaceCount.current = 0; }, 1000);
+            if (spaceCount.current >= 5) {
+                spaceCount.current = 0;
+                setEmail('john.doe@example.com');
+                setPassword('Test123!');
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     async function handleSubmit(e: FormEvent) {
         e.preventDefault();
