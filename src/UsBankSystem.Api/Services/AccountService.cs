@@ -53,8 +53,12 @@ public class AccountService(AppDbContext db)
 
     public async Task<List<AccountResponse>> GetAllAsync(Guid userId)
     {
+        var juniorAccountIds = await db.JuniorAccounts
+            .Select(j => j.AccountId)
+            .ToListAsync();
+
         return await db.Accounts
-            .Where(a => a.UserId == userId)
+            .Where(a => a.UserId == userId && !juniorAccountIds.Contains(a.Id))
             .OrderBy(a => a.CreatedAt)
             .Select(a => new AccountResponse
             {
