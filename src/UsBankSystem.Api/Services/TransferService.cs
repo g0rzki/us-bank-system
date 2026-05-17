@@ -453,6 +453,109 @@ public class TransferService(
             .ToListAsync();
     }
 
+    public async Task<TransferResponse> ApproveAsync(Guid userId, Guid transferId)
+    {
+        var transfer = await db.Transfers
+            .Include(t => t.FromAccount)
+            .Include(t => t.ToAccount)
+            .FirstOrDefaultAsync(t => t.Id == transferId)
+            ?? throw new KeyNotFoundException("Transfer not found");
+
+        if (transfer.Status != TransferStatus.PendingApproval)
+            throw new InvalidOperationException("Transfer is not awaiting approval");
+
+        var isParent = await db.JuniorAccounts.AnyAsync(j =>
+            j.AccountId == transfer.FromAccountId &&
+            j.ParentAccount.UserId == userId);
+
+        if (!isParent)
+            throw new UnauthorizedAccessException("Access denied");
+
+        var availableBalance = transfer.FromAccount.Balance - transfer.FromAccount.ReservedBalance;
+        if (availableBalance < transfer.Amount)
+            throw new InvalidOperationException("Insufficient funds");
+
+        transfer.FromAccount.Balance -= transfer.Amount;
+        transfer.FromAccount.ReservedBalance -= transfer.Amount;
+        if (transfer.ToAccount is not null)
+            transfer.ToAccount.Balance += transfer.Amount;
+
+        transfer.Status = TransferStatus.Completed;
+        transfer.ApprovedBy = userId;
+        transfer.ApprovedAt = DateTime.UtcNow;
+        transfer.CompletedAt = DateTime.UtcNow;
+
+        db.Transactions.AddRange(
+            new Transaction
+            {
+                Id = Guid.NewGuid(),
+                AccountId = transfer.FromAccountId,
+                Amount = transfer.Amount,
+                Type = TransactionType.Debit,
+                Status = TransactionStatus.Completed,
+                Description = transfer.Description ?? "Junior transfer",
+                ReferenceId = transfer.Id.ToString(),
+                CreatedAt = DateTime.UtcNow
+            },
+            new Transaction
+            {
+                Id = Guid.NewGuid(),
+                AccountId = transfer.ToAccountId!.Value,
+                Amount = transfer.Amount,
+                Type = TransactionType.Credit,
+                Status = TransactionStatus.Completed,
+                Description = transfer.Description ?? "Junior transfer",
+                ReferenceId = transfer.Id.ToString(),
+                CreatedAt = DateTime.UtcNow
+            }
+        );
+
+        await db.SaveChangesAsync();
+
+        return MapToTransferResponse(transfer);
+    }
+
+    public async Task<TransferResponse> RejectAsync(Guid userId, Guid transferId)
+    {
+        var transfer = await db.Transfers
+            .Include(t => t.FromAccount)
+            .FirstOrDefaultAsync(t => t.Id == transferId)
+            ?? throw new KeyNotFoundException("Transfer not found");
+
+        if (transfer.Status != TransferStatus.PendingApproval)
+            throw new InvalidOperationException("Transfer is not awaiting approval");
+
+        var isParent = await db.JuniorAccounts.AnyAsync(j =>
+            j.AccountId == transfer.FromAccountId &&
+            j.ParentAccount.UserId == userId);
+
+        if (!isParent)
+            throw new UnauthorizedAccessException("Access denied");
+
+        transfer.FromAccount.ReservedBalance -= transfer.Amount;
+        transfer.Status = TransferStatus.Rejected;
+        transfer.RejectedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+
+        return MapToTransferResponse(transfer);
+    }
+
+    private static TransferResponse MapToTransferResponse(Transfer transfer) => new()
+    {
+        Id = transfer.Id,
+        FromAccountId = transfer.FromAccountId,
+        ToAccountId = transfer.ToAccountId,
+        Amount = transfer.Amount,
+        Currency = transfer.Currency,
+        Channel = transfer.Channel,
+        Status = transfer.Status,
+        Description = transfer.Description,
+        CreatedAt = transfer.CreatedAt,
+        CompletedAt = transfer.CompletedAt,
+        RequiresApproval = transfer.RequiresApproval
+    };
+
     public async Task<List<TransferResponse>> GetAllAsync(Guid userId)
     {
         return await db.Transfers

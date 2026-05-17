@@ -90,6 +90,32 @@ public class TransfersController(TransferService transferService, IConfiguration
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
+    [HttpPost("{id:guid}/approve")]
+    [ProducesResponseType(typeof(TransferResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Approve(Guid id)
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        var result = await transferService.ApproveAsync(userId, id);
+        return Ok(result);
+    }
+
+    [HttpPost("{id:guid}/reject")]
+    [ProducesResponseType(typeof(TransferResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Reject(Guid id)
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        var result = await transferService.RejectAsync(userId, id);
+        return Ok(result);
+    }
+
     [HttpGet("{id:guid}/status")]
     [ProducesResponseType(typeof(TransferStatusResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

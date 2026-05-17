@@ -47,7 +47,10 @@ export default function TransfersView() {
                     {loading ? (
                         <div className="db-loading">Loading...</div>
                     ) : (
-                        <PendingApprovalList transfers={pendingApproval} />
+                        <PendingApprovalList
+                            transfers={pendingApproval}
+                            onResolved={id => setPendingApproval(prev => prev.filter(t => t.id !== id))}
+                        />
                     )}
                 </div>
             )}
