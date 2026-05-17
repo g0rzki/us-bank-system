@@ -76,4 +76,16 @@ public class AccountsController(AccountService accountService) : ControllerBase
         var result = await accountService.GetJuniorAccountsAsync(userId, id);
         return Ok(result);
     }
+    
+    [HttpPost("junior")]
+    [ProducesResponseType(typeof(JuniorAccountResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreateJunior([FromBody] CreateJuniorAccountRequest request)
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        var result = await accountService.CreateJuniorAsync(userId, request);
+        return StatusCode(StatusCodes.Status201Created, result);
+    }
 }

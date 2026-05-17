@@ -182,6 +182,55 @@ public class AccountService(AppDbContext db)
             .ToListAsync();
     }
 
+    public async Task<JuniorAccountResponse> CreateJuniorAsync(Guid userId, CreateJuniorAccountRequest request)
+    {
+        JuniorAccountValidator.ValidateDateOfBirth(request.DateOfBirth);
+
+        var parentAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ParentAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
+                            ?? throw new KeyNotFoundException("Parent account not found or inactive");
+
+        var juniorAccount = new Account
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            AccountNumber = await GenerateAccountNumberAsync(db),
+            Type = AccountType.Checking,
+            Currency = CurrencyCode.USD,
+            Balance = 0,
+            ReservedBalance = 0,
+            Status = AccountStatus.Active,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        db.Accounts.Add(juniorAccount);
+
+        var juniorLink = new UsBankSystem.Core.Entities.JuniorAccount
+        {
+            Id = Guid.NewGuid(),
+            AccountId = juniorAccount.Id,
+            ParentAccountId = parentAccount.Id,
+            DateOfBirth = request.DateOfBirth,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        db.JuniorAccounts.Add(juniorLink);
+        await db.SaveChangesAsync();
+
+        return new JuniorAccountResponse
+        {
+            JuniorAccountId = juniorLink.Id,
+            AccountId = juniorAccount.Id,
+            AccountNumber = juniorAccount.AccountNumber,
+            Balance = juniorAccount.Balance,
+            Currency = juniorAccount.Currency,
+            Status = juniorAccount.Status,
+            DateOfBirth = juniorLink.DateOfBirth,
+            CardDailyLimit = null,
+            CardMonthlyLimit = null,
+            CreatedAt = juniorLink.CreatedAt
+        };
+    }
+    
     private static async Task<string> GenerateAccountNumberAsync(AppDbContext db)
     {
         string accountNumber;
