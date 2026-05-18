@@ -22,6 +22,12 @@ public class AccountService(AppDbContext db)
         var userExists = await db.Users.AnyAsync(u => u.Id == userId);
         if (!userExists)
             throw new KeyNotFoundException("User not found");
+        
+        var accountCount = await db.Accounts
+            .Where(a => a.UserId == userId && !db.JuniorAccounts.Any(j => j.AccountId == a.Id))
+            .CountAsync();
+        if (accountCount >= 5)
+            throw new InvalidOperationException("Account limit reached. Maximum 5 accounts per user.");
 
         var account = new Account
         {

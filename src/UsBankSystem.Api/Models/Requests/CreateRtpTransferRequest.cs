@@ -8,7 +8,7 @@ public class CreateRtpTransferRequest
     public Guid FromAccountId { get; set; }
 
     [Required]
-    public Guid ToAccountId { get; set; }
+    public string ToAccountNumber { get; set; } = null!;
 
     [Required]
     [Range(0.01, double.MaxValue)]

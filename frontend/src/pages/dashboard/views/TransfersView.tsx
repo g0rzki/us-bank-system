@@ -3,6 +3,9 @@ import { getTransfers, getTransferStatus, getPendingApprovalTransfers } from '..
 import type { Transfer, TransferStatus, PendingApprovalTransfer } from '../../../api/transfers';
 import TransferStatusCard from '../components/TransferStatusCard';
 import PendingApprovalList from '../components/PendingApprovalList';
+import { getAccounts } from '../../../api/accounts';
+import type { Account } from '../../../api/accounts';
+import TransferForm from '../components/TransferForm';
 
 export default function TransfersView() {
     const [transfers, setTransfers] = useState<Transfer[]>([]);
@@ -11,14 +14,18 @@ export default function TransfersView() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [detailLoading, setDetailLoading] = useState(false);
+    const [showForm, setShowForm] = useState(false);
+    const [accounts, setAccounts] = useState<Account[]>([]);
 
     useEffect(() => {
         Promise.all([
             getTransfers(),
             getPendingApprovalTransfers(),
-        ]).then(([all, pending]) => {
+            getAccounts(),
+        ]).then(([all, pending, accs]) => {
             setTransfers(all);
             setPendingApproval(pending);
+            setAccounts(accs);
         }).catch(() => {
             setError('Failed to load transfers. Please try again.');
         }).finally(() => setLoading(false));
@@ -33,6 +40,17 @@ export default function TransfersView() {
         } finally {
             setDetailLoading(false);
         }
+    };
+
+    const [channel, setChannel] = useState<Channel>('internal');
+    type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift';
+
+    const CHANNEL_INFO: Record<Channel, { label: string; desc: string; settlement: string }> = {
+        internal: { label: 'Internal', desc: 'Between your accounts', settlement: 'Instant' },
+        ach: { label: 'ACH', desc: 'Standard bank transfer', settlement: 'T+1 business day' },
+        rtp: { label: 'RTP', desc: 'Real-time payment', settlement: 'Instant (24/7)' },
+        fednow: { label: 'FedNow', desc: 'Instant RTGS settlement', settlement: 'Instant' },
+        swift: { label: 'SWIFT', desc: 'International wire transfer', settlement: '1–5 business days' },
     };
 
     return (
@@ -88,21 +106,32 @@ export default function TransfersView() {
             <div className="db-section">
                 <h2 className="db-section-title">New transfer</h2>
                 <div className="db-transfer-grid">
-                    {[
-                        { label: 'Internal transfer', desc: 'Between your accounts' },
-                        { label: 'ACH transfer', desc: 'Standard bank transfer (T+1)' },
-                        { label: 'RTP transfer', desc: 'Real-time payment' },
-                        { label: 'FedNow', desc: 'Instant RTGS settlement' },
-                        { label: 'SWIFT', desc: 'International wire transfer' },
-                    ].map(t => (
-                        <button key={t.label} className="db-transfer-card" disabled>
-                            <span className="db-transfer-label">{t.label}</span>
-                            <span className="db-transfer-desc">{t.desc}</span>
-                            <span className="db-coming-soon">Coming soon</span>
+                    {(Object.keys(CHANNEL_INFO) as Channel[]).map(ch => (
+                        <button
+                            key={ch}
+                            className="db-transfer-card"
+                            onClick={() => { setChannel(ch); setShowForm(true); }}
+                            disabled={accounts.length === 0}
+                        >
+                            <span className="db-transfer-label">{CHANNEL_INFO[ch].label}</span>
+                            <span className="db-transfer-desc">{CHANNEL_INFO[ch].desc}</span>
+                            <span className="db-transfer-settlement">{CHANNEL_INFO[ch].settlement}</span>
                         </button>
                     ))}
                 </div>
             </div>
+
+            {showForm && accounts.length > 0 && (
+                <TransferForm
+                    accounts={accounts}
+                    initialChannel={channel}
+                    onSuccess={() => {
+                        setShowForm(false);
+                        getTransfers().then(setTransfers);
+                    }}
+                    onCancel={() => setShowForm(false)}
+                />
+            )}
         </div>
     );
 }

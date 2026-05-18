@@ -4,6 +4,7 @@ import { register } from '../../api/auth';
 import { validateRegisterForm } from '../../utils/validators';
 import type { RegisterErrors } from '../../utils/validators';
 import { getApiErrorStatus, isNetworkError } from '../../utils/apiError';
+import { useDarkMode } from '../../utils/useDarkMode';
 import FormField from '../../components/FormField';
 import Button from '../../components/Button';
 import ErrorBanner from '../../components/ErrorBanner';
@@ -13,6 +14,7 @@ interface Errors extends RegisterErrors { general?: string; }
 
 export default function RegisterPage() {
     const navigate = useNavigate();
+    const { dark, toggle } = useDarkMode();
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [email, setEmail] = useState('');
@@ -41,10 +43,12 @@ export default function RegisterPage() {
 
     return (
         <div className="auth-container">
+            <button className="landing-theme-toggle" onClick={toggle}>
+                {dark ? '☀️' : '🌙'}
+            </button>
             <div className="auth-card">
                 <h1 className="auth-title">Create account</h1>
                 <p className="auth-subtitle">US Bank</p>
-
                 <form onSubmit={handleSubmit} noValidate>
                     <ErrorBanner message={errors.general} />
                     <div className="auth-name-row">
@@ -56,7 +60,6 @@ export default function RegisterPage() {
                     <FormField id="confirmPassword" label="Confirm password" type="password" value={confirmPassword} onChange={setConfirmPassword} error={errors.confirmPassword} placeholder="••••••••" autoComplete="new-password" />
                     <Button loading={loading} loadingText="Creating account…">Create account</Button>
                 </form>
-
                 <p className="auth-switch">
                     Already have an account? <Link to="/login">Sign in</Link>
                 </p>

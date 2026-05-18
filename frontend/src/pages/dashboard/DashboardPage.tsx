@@ -8,6 +8,7 @@ import TransfersView from './views/TransfersView';
 import HistoryView from './views/HistoryView';
 import SettingsView from './views/SettingsView';
 import './DashboardPage.css';
+import { useDarkMode } from '../../utils/useDarkMode';
 
 export type View = 'overview' | 'accounts' | 'transfers' | 'history' | 'settings';
 
@@ -18,22 +19,6 @@ const NAV_ITEMS: { id: View; label: string }[] = [
     { id: 'history', label: 'History' },
     { id: 'settings', label: 'Settings' },
 ];
-
-function useDarkMode() {
-    const [dark, setDark] = useState(() => {
-        const saved = localStorage.getItem('theme');
-        return saved ? saved === 'dark' : true;
-    });
-    useEffect(() => {
-        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-    }, [dark]);
-    const toggle = () => {
-        const next = !dark;
-        localStorage.setItem('theme', next ? 'dark' : 'light');
-        setDark(next);
-    };
-    return { dark, toggle };
-}
 
 export default function DashboardPage() {
     const [view, setView] = useState<View>('overview');
