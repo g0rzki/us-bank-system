@@ -120,7 +120,7 @@ public class ApprovalServiceTests
         {
             Id = Guid.NewGuid(),
             AccountId = juniorAccount.Id,
-            ParentAccountId = parentAccount.Id,
+            ParentUserId = user.Id,
             DateOfBirth = new DateOnly(2015, 6, 15),
             CreatedAt = DateTime.UtcNow
         });

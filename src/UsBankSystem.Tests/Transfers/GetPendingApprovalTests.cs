@@ -145,7 +145,7 @@ public class GetPendingApprovalTests
         {
             Id = Guid.NewGuid(),
             AccountId = juniorAccount.Id,
-            ParentAccountId = parentAccount.Id,
+            ParentUserId = parentUser.Id,
             DateOfBirth = new DateOnly(2015, 6, 15),
             CreatedAt = DateTime.UtcNow
         });

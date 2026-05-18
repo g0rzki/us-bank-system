@@ -312,27 +312,37 @@ public static class DbSeeder
 
         context.BlikCodes.AddRange(blikCodes);
 
+        // Junior users
+        var juniorUser1 = new User { Id = Guid.Parse("ffff1111-1111-1111-1111-111111111111"), Email = "emma.doe@example.com",     PasswordHash = BCryptHash("Test123!"), FirstName = "Emma",   LastName = "Doe",   Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) };
+        var juniorUser2 = new User { Id = Guid.Parse("ffff2222-2222-2222-2222-222222222222"), Email = "liam.doe@example.com",     PasswordHash = BCryptHash("Test123!"), FirstName = "Liam",   LastName = "Doe",   Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) };
+        var juniorUser3 = new User { Id = Guid.Parse("ffff3333-3333-3333-3333-333333333333"), Email = "sophie.doe@example.com",   PasswordHash = BCryptHash("Test123!"), FirstName = "Sophie", LastName = "Doe",   Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-15) };
+        var juniorUser4 = new User { Id = Guid.Parse("ffff4444-4444-4444-4444-444444444444"), Email = "oliver.smith@example.com", PasswordHash = BCryptHash("Test123!"), FirstName = "Oliver", LastName = "Smith", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) };
+        var juniorUser5 = new User { Id = Guid.Parse("ffff5555-5555-5555-5555-555555555555"), Email = "mia.smith@example.com",    PasswordHash = BCryptHash("Test123!"), FirstName = "Mia",    LastName = "Smith", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) };
+        var juniorUser6 = new User { Id = Guid.Parse("ffff6666-6666-6666-6666-666666666666"), Email = "noah.smith@example.com",   PasswordHash = BCryptHash("Test123!"), FirstName = "Noah",   LastName = "Smith", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-10) };
+
+        context.Users.AddRange(juniorUser1, juniorUser2, juniorUser3, juniorUser4, juniorUser5, juniorUser6);
+
         // Junior accounts — john.doe ma 3, jane.smith ma 3, bob.wilson ma 0
         var juniorAccounts = new List<Account>
         {
-            new() { Id = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), UserId = user1.Id, AccountNumber = "4000000001", Type = "checking", Balance = 250.00m, ReservedBalance = 30.00m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) },
-            new() { Id = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), UserId = user1.Id, AccountNumber = "4000000002", Type = "checking", Balance = 80.50m,  ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) },
-            new() { Id = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), UserId = user1.Id, AccountNumber = "4000000003", Type = "checking", Balance = 510.00m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-15) },
-            new() { Id = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), UserId = user2.Id, AccountNumber = "4000000004", Type = "checking", Balance = 120.00m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) },
-            new() { Id = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), UserId = user2.Id, AccountNumber = "4000000005", Type = "checking", Balance = 340.75m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) },
-            new() { Id = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), UserId = user2.Id, AccountNumber = "4000000006", Type = "checking", Balance = 60.00m,  ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-10) },
+            new() { Id = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), UserId = juniorUser1.Id, AccountNumber = "4000000001", Type = "checking", Balance = 250.00m, ReservedBalance = 30.00m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) },
+            new() { Id = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), UserId = juniorUser2.Id, AccountNumber = "4000000002", Type = "checking", Balance = 80.50m,  ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) },
+            new() { Id = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), UserId = juniorUser3.Id, AccountNumber = "4000000003", Type = "checking", Balance = 510.00m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-15) },
+            new() { Id = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), UserId = juniorUser4.Id, AccountNumber = "4000000004", Type = "checking", Balance = 120.00m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) },
+            new() { Id = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), UserId = juniorUser5.Id, AccountNumber = "4000000005", Type = "checking", Balance = 340.75m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) },
+            new() { Id = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), UserId = juniorUser6.Id, AccountNumber = "4000000006", Type = "checking", Balance = 60.00m,  ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-10) },
         };
 
         context.Accounts.AddRange(juniorAccounts);
 
         var juniorLinks = new List<JuniorAccount>
         {
-            new() { Id = Guid.Parse("eeee5555-1111-1111-1111-111111111111"), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), ParentAccountId = account1Checking.Id, DateOfBirth = new DateOnly(2015, 6, 15),  CreatedAt = DateTime.UtcNow.AddMonths(-2) },
-            new() { Id = Guid.Parse("eeee5555-2222-2222-2222-222222222222"), AccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), ParentAccountId = account1Checking.Id, DateOfBirth = new DateOnly(2013, 3, 22),  CreatedAt = DateTime.UtcNow.AddMonths(-1) },
-            new() { Id = Guid.Parse("eeee5555-3333-3333-3333-333333333333"), AccountId = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), ParentAccountId = account1Checking.Id, DateOfBirth = new DateOnly(2016, 11, 5),  CreatedAt = DateTime.UtcNow.AddDays(-15) },
-            new() { Id = Guid.Parse("eeee5555-4444-4444-4444-444444444444"), AccountId = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2014, 8, 30),  CreatedAt = DateTime.UtcNow.AddMonths(-2) },
-            new() { Id = Guid.Parse("eeee5555-5555-5555-5555-555555555555"), AccountId = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2017, 1, 12),  CreatedAt = DateTime.UtcNow.AddMonths(-1) },
-            new() { Id = Guid.Parse("eeee5555-6666-6666-6666-666666666666"), AccountId = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), ParentAccountId = account2Checking.Id, DateOfBirth = new DateOnly(2014, 5, 19),  CreatedAt = DateTime.UtcNow.AddDays(-10) },
+            new() { Id = Guid.Parse("eeee5555-1111-1111-1111-111111111111"), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), ParentUserId = user1.Id, DateOfBirth = new DateOnly(2015, 6, 15),  CreatedAt = DateTime.UtcNow.AddMonths(-2) },
+            new() { Id = Guid.Parse("eeee5555-2222-2222-2222-222222222222"), AccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), ParentUserId = user1.Id, DateOfBirth = new DateOnly(2013, 3, 22),  CreatedAt = DateTime.UtcNow.AddMonths(-1) },
+            new() { Id = Guid.Parse("eeee5555-3333-3333-3333-333333333333"), AccountId = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), ParentUserId = user1.Id, DateOfBirth = new DateOnly(2016, 11, 5),  CreatedAt = DateTime.UtcNow.AddDays(-15) },
+            new() { Id = Guid.Parse("eeee5555-4444-4444-4444-444444444444"), AccountId = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), ParentUserId = user2.Id, DateOfBirth = new DateOnly(2014, 8, 30),  CreatedAt = DateTime.UtcNow.AddMonths(-2) },
+            new() { Id = Guid.Parse("eeee5555-5555-5555-5555-555555555555"), AccountId = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), ParentUserId = user2.Id, DateOfBirth = new DateOnly(2017, 1, 12),  CreatedAt = DateTime.UtcNow.AddMonths(-1) },
+            new() { Id = Guid.Parse("eeee5555-6666-6666-6666-666666666666"), AccountId = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), ParentUserId = user2.Id, DateOfBirth = new DateOnly(2014, 5, 19),  CreatedAt = DateTime.UtcNow.AddDays(-10) },
         };
 
         context.JuniorAccounts.AddRange(juniorLinks);
@@ -348,6 +358,43 @@ public static class DbSeeder
         };
 
         context.Cards.AddRange(juniorCards);
+
+        // Junior transactions
+        var juniorTransactions = new List<Transaction>
+        {
+            // dddd4444-1111 (balance 250, reserved 30)
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), Amount = 100.00m, Type = "credit", Status = "completed", Description = "Allowance from parent", CreatedAt = DateTime.UtcNow.AddDays(-55) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), Amount = 25.00m,  Type = "debit",  Status = "completed", Description = "Toy store",            CreatedAt = DateTime.UtcNow.AddDays(-40) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), Amount = 200.00m, Type = "credit", Status = "completed", Description = "Birthday gift",         CreatedAt = DateTime.UtcNow.AddDays(-30) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), Amount = 15.00m,  Type = "debit",  Status = "completed", Description = "Ice cream",             CreatedAt = DateTime.UtcNow.AddDays(-20) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), Amount = 30.00m,  Type = "debit",  Status = "pending_approval", Description = "Pocket money",   CreatedAt = DateTime.UtcNow.AddHours(-2) },
+
+            // dddd4444-2222 (balance 80.50)
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), Amount = 50.00m,  Type = "credit", Status = "completed", Description = "Allowance from parent", CreatedAt = DateTime.UtcNow.AddDays(-25) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), Amount = 12.50m,  Type = "debit",  Status = "completed", Description = "School supplies",       CreatedAt = DateTime.UtcNow.AddDays(-15) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), Amount = 58.00m,  Type = "credit", Status = "completed", Description = "Chores reward",         CreatedAt = DateTime.UtcNow.AddDays(-10) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), Amount = 15.00m,  Type = "debit",  Status = "pending_approval", Description = "Savings contribution", CreatedAt = DateTime.UtcNow.AddHours(-1) },
+
+            // dddd4444-3333 (balance 510)
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), Amount = 500.00m, Type = "credit", Status = "completed", Description = "Graduation gift",       CreatedAt = DateTime.UtcNow.AddDays(-14) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), Amount = 10.00m,  Type = "debit",  Status = "completed", Description = "Snacks",                CreatedAt = DateTime.UtcNow.AddDays(-7) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), Amount = 20.00m,  Type = "credit", Status = "completed", Description = "Allowance from parent", CreatedAt = DateTime.UtcNow.AddDays(-3) },
+
+            // dddd4444-4444 (balance 120)
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), Amount = 80.00m,  Type = "credit", Status = "completed", Description = "Allowance from parent", CreatedAt = DateTime.UtcNow.AddDays(-50) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), Amount = 20.00m,  Type = "debit",  Status = "completed", Description = "Book store",            CreatedAt = DateTime.UtcNow.AddDays(-35) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), Amount = 60.00m,  Type = "credit", Status = "completed", Description = "Christmas gift",        CreatedAt = DateTime.UtcNow.AddDays(-20) },
+
+            // dddd4444-5555 (balance 340.75)
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), Amount = 150.00m, Type = "credit", Status = "completed", Description = "Allowance from parent", CreatedAt = DateTime.UtcNow.AddDays(-28) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), Amount = 9.25m,   Type = "debit",  Status = "completed", Description = "Cinema ticket",         CreatedAt = DateTime.UtcNow.AddDays(-18) },
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), Amount = 200.00m, Type = "credit", Status = "completed", Description = "Birthday money",        CreatedAt = DateTime.UtcNow.AddDays(-10) },
+
+            // dddd4444-6666 (balance 60)
+            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), Amount = 60.00m,  Type = "credit", Status = "completed", Description = "Allowance from parent", CreatedAt = DateTime.UtcNow.AddDays(-9) },
+        };
+
+        context.Transactions.AddRange(juniorTransactions);
 
         // Pending approval transfers (from junior accounts, awaiting parent approval)
         var pendingApprovalTransfers = new List<Transfer>

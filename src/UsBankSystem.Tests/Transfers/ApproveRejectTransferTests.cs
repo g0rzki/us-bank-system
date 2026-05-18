@@ -91,7 +91,7 @@ public class ApproveRejectTransferTests
         var toAccount = new Account { Id = Guid.NewGuid(), UserId = otherUser.Id, AccountNumber = "3000000001", Type = "checking", Balance = 500m, ReservedBalance = 0m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow };
         db.Accounts.AddRange(parentAccount, juniorAccount, toAccount);
 
-        db.JuniorAccounts.Add(new JuniorAccount { Id = Guid.NewGuid(), AccountId = juniorAccount.Id, ParentAccountId = parentAccount.Id, DateOfBirth = new DateOnly(2015, 6, 15), CreatedAt = DateTime.UtcNow });
+        db.JuniorAccounts.Add(new JuniorAccount { Id = Guid.NewGuid(), AccountId = juniorAccount.Id, ParentUserId = parentUser.Id, DateOfBirth = new DateOnly(2015, 6, 15), CreatedAt = DateTime.UtcNow });
 
         var transfer = new Transfer { Id = Guid.NewGuid(), FromAccountId = juniorAccount.Id, ToAccountId = toAccount.Id, Amount = 30m, Currency = "USD", Channel = TransferChannel.Internal, Status = TransferStatus.PendingApproval, RequiresApproval = true, CreatedAt = DateTime.UtcNow };
         db.Transfers.Add(transfer);
