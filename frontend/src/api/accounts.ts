@@ -49,6 +49,8 @@ export interface JuniorAccount {
     juniorAccountId: string;
     accountId: string;
     accountNumber: string;
+    firstName: string;
+    lastName: string;
     balance: number;
     currency: string;
     status: string;
@@ -60,5 +62,10 @@ export interface JuniorAccount {
 
 export async function getJuniorAccounts(parentAccountId: string): Promise<JuniorAccount[]> {
     const res = await client.get<JuniorAccount[]>(`/accounts/${parentAccountId}/junior-accounts`);
+    return res.data;
+}
+
+export async function createJuniorAccount(parentAccountId: string, email: string, password: string, firstName: string, lastName: string, dateOfBirth: string): Promise<JuniorAccount> {
+    const res = await client.post<JuniorAccount>('/accounts/junior', { parentAccountId, email, password, firstName, lastName, dateOfBirth });
     return res.data;
 }

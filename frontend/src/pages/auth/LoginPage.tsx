@@ -22,16 +22,31 @@ export default function LoginPage() {
 
     const spaceCount = useRef(0);
     const spaceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const altCount = useRef(0);
+    const altTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     useEffect(() => {
         function handleKeyDown(e: KeyboardEvent) {
-            if (e.code !== 'Space') { spaceCount.current = 0; return; }
-            spaceCount.current += 1;
-            if (spaceTimer.current) clearTimeout(spaceTimer.current);
-            spaceTimer.current = setTimeout(() => { spaceCount.current = 0; }, 1000);
-            if (spaceCount.current >= 5) {
+            if (e.code === 'Space') {
+                spaceCount.current += 1;
+                if (spaceTimer.current) clearTimeout(spaceTimer.current);
+                spaceTimer.current = setTimeout(() => { spaceCount.current = 0; }, 1000);
+                if (spaceCount.current >= 5) {
+                    spaceCount.current = 0;
+                    setEmail('john.doe@example.com');
+                    setPassword('Test123!');
+                }
+            } else if (e.code === 'AltLeft' || e.code === 'AltRight') {
+                altCount.current += 1;
+                if (altTimer.current) clearTimeout(altTimer.current);
+                altTimer.current = setTimeout(() => { altCount.current = 0; }, 1000);
+                if (altCount.current >= 5) {
+                    altCount.current = 0;
+                    setEmail('emma.doe@example.com');
+                    setPassword('Test123!');
+                }
+            } else {
                 spaceCount.current = 0;
-                setEmail('john.doe@example.com');
-                setPassword('Test123!');
+                altCount.current = 0;
             }
         }
         window.addEventListener('keydown', handleKeyDown);
@@ -46,8 +61,15 @@ export default function LoginPage() {
         setLoading(true);
         setErrors({});
         try {
-            await login({ email, password });
-            navigate('/dashboard');
+            const token = await login({ email, password });
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            if (payload.role === 'junior') {
+                localStorage.setItem('kid_token', token);
+                localStorage.removeItem('token');
+                navigate('/kid');
+            } else {
+                navigate('/dashboard');
+            }
         } catch (err: unknown) {
             const status = getApiErrorStatus(err);
             setErrors({ general: isNetworkError(err) ? 'Unable to connect to server. Try again later.' : status === 401 ? 'Invalid email or password' : 'Something went wrong. Try again.' });
