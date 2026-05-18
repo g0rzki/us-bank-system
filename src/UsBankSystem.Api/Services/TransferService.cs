@@ -30,8 +30,11 @@ public class TransferService(
         var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
             ?? throw new KeyNotFoundException("Source account not found or inactive");
 
-        var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId && a.Status == AccountStatus.Active)
-            ?? throw new KeyNotFoundException("Destination account not found or inactive");
+        var toAccount = request.ToAccountId.HasValue
+            ? await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId.Value && a.Status == AccountStatus.Active)
+            : await db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == request.ToAccountNumber && a.Status == AccountStatus.Active);
+        if (toAccount is null)
+            throw new KeyNotFoundException("Destination account not found or inactive");
 
         if (fromAccount.Id == toAccount.Id)
             throw new ArgumentException("Cannot transfer to the same account");
@@ -134,6 +137,28 @@ public class TransferService(
         if (availableBalance < request.Amount)
             throw new ArgumentException("Insufficient funds");
 
+        var isJunior = await db.JuniorAccounts.AnyAsync(j => j.AccountId == fromAccount.Id);
+        if (isJunior)
+        {
+            fromAccount.ReservedBalance += request.Amount;
+            var pendingTransfer = new Transfer
+            {
+                Id = Guid.NewGuid(),
+                FromAccountId = fromAccount.Id,
+                ToAccountId = null,
+                Amount = request.Amount,
+                Currency = request.Currency.ToUpperInvariant(),
+                Channel = TransferChannel.Ach,
+                Status = TransferStatus.PendingApproval,
+                Description = request.Description,
+                RequiresApproval = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            db.Transfers.Add(pendingTransfer);
+            await db.SaveChangesAsync();
+            return MapToTransferResponse(pendingTransfer);
+        }
+
         var config = paymentConfig.Value.Ach;
         var now = DateTime.UtcNow;
         var cutoff = new DateTime(now.Year, now.Month, now.Day, config.CutoffHour, 0, 0, DateTimeKind.Utc);
@@ -228,6 +253,28 @@ public class TransferService(
     	var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
     	if (availableBalance < request.Amount)
         	throw new ArgumentException("Insufficient funds");
+
+        var isJunior = await db.JuniorAccounts.AnyAsync(j => j.AccountId == fromAccount.Id);
+        if (isJunior)
+        {
+            fromAccount.ReservedBalance += request.Amount;
+            var pendingTransfer = new Transfer
+            {
+                Id = Guid.NewGuid(),
+                FromAccountId = fromAccount.Id,
+                ToAccountId = toAccount.Id,
+                Amount = request.Amount,
+                Currency = request.Currency.ToUpperInvariant(),
+                Channel = TransferChannel.Rtp,
+                Status = TransferStatus.PendingApproval,
+                Description = request.Description,
+                RequiresApproval = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            db.Transfers.Add(pendingTransfer);
+            await db.SaveChangesAsync();
+            return MapToTransferResponse(pendingTransfer);
+        }
 
     	var timeout = paymentConfig.Value.Rtp.TimeoutSeconds;
 
@@ -338,6 +385,28 @@ public class TransferService(
     	if (availableBalance < request.Amount)
         	throw new ArgumentException("Insufficient funds");
 
+        var isJunior = await db.JuniorAccounts.AnyAsync(j => j.AccountId == fromAccount.Id);
+        if (isJunior)
+        {
+            fromAccount.ReservedBalance += request.Amount;
+            var pendingTransfer = new Transfer
+            {
+                Id = Guid.NewGuid(),
+                FromAccountId = fromAccount.Id,
+                ToAccountId = toAccount.Id,
+                Amount = request.Amount,
+                Currency = request.Currency.ToUpperInvariant(),
+                Channel = TransferChannel.FedNow,
+                Status = TransferStatus.PendingApproval,
+                Description = request.Description,
+                RequiresApproval = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            db.Transfers.Add(pendingTransfer);
+            await db.SaveChangesAsync();
+            return MapToTransferResponse(pendingTransfer);
+        }
+
     	var timeout = paymentConfig.Value.FedNow.TimeoutSeconds;
 
     	fromAccount.ReservedBalance += request.Amount;
@@ -436,7 +505,7 @@ public class TransferService(
                 t.Status == TransferStatus.PendingApproval &&
                 db.JuniorAccounts.Any(j =>
                     j.AccountId == t.FromAccountId &&
-                    j.ParentAccount.UserId == userId))
+                    j.ParentUserId == userId))
             .OrderBy(t => t.CreatedAt)
             .Select(t => new PendingApprovalTransferResponse
             {
@@ -466,7 +535,7 @@ public class TransferService(
 
         var isParent = await db.JuniorAccounts.AnyAsync(j =>
             j.AccountId == transfer.FromAccountId &&
-            j.ParentAccount.UserId == userId);
+            j.ParentUserId == userId);
 
         if (!isParent)
             throw new UnauthorizedAccessException("Access denied");
@@ -527,7 +596,7 @@ public class TransferService(
 
         var isParent = await db.JuniorAccounts.AnyAsync(j =>
             j.AccountId == transfer.FromAccountId &&
-            j.ParentAccount.UserId == userId);
+            j.ParentUserId == userId);
 
         if (!isParent)
             throw new UnauthorizedAccessException("Access denied");
@@ -592,6 +661,28 @@ public class TransferService(
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
             throw new ArgumentException("Insufficient funds");
+
+        var isJunior = await db.JuniorAccounts.AnyAsync(j => j.AccountId == fromAccount.Id);
+        if (isJunior)
+        {
+            fromAccount.ReservedBalance += request.Amount;
+            var pendingTransfer = new Transfer
+            {
+                Id = Guid.NewGuid(),
+                FromAccountId = fromAccount.Id,
+                ToAccountId = null,
+                Amount = request.Amount,
+                Currency = request.Currency.ToUpperInvariant(),
+                Channel = TransferChannel.Swift,
+                Status = TransferStatus.PendingApproval,
+                Description = request.Description,
+                RequiresApproval = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            db.Transfers.Add(pendingTransfer);
+            await db.SaveChangesAsync();
+            return MapToTransferResponse(pendingTransfer);
+        }
 
         var todaySwiftTotal = await GetTodayTransferTotalByChannelAsync(fromAccount.Id, TransferChannel.Swift);
         SwiftRequestValidator.ValidateDailyLimit(todaySwiftTotal, request.Amount, paymentConfig.Value.Swift.DailyLimitPerAccount);
@@ -680,7 +771,11 @@ public class TransferService(
             .FirstOrDefaultAsync(t => t.Id == transferId)
             ?? throw new KeyNotFoundException("Transfer not found");
 
-        if (transfer.FromAccount.UserId != userId)
+        var isOwner = transfer.FromAccount.UserId == userId
+            || (transfer.ToAccountId.HasValue && await db.Accounts.AnyAsync(a => a.Id == transfer.ToAccountId && a.UserId == userId))
+            || await db.JuniorAccounts.AnyAsync(j => j.AccountId == transfer.FromAccountId && j.ParentUserId == userId);
+
+        if (!isOwner)
             throw new UnauthorizedAccessException("Access denied");
 
         return new TransferStatusResponse

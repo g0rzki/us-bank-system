@@ -44,22 +44,27 @@ public class AuthService(AppDbContext db, IConfiguration config)
         if (user.Status != UserStatus.Active)
             throw new UnauthorizedAccessException("Account is not active");
 
-        return GenerateJwt(user);
+        var isJunior = await db.JuniorAccounts
+            .AnyAsync(j => j.Account.UserId == user.Id);
+
+        return GenerateJwt(user, isJunior);
     }
 
-    private LoginResponse GenerateJwt(User user)
+    private LoginResponse GenerateJwt(User user, bool isJunior = false)
     {
         var secret = config["Jwt:Secret"]!;
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var expiresAt = DateTime.UtcNow.AddHours(1);
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, user.Email),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Email, user.Email!),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
+        if (isJunior)
+            claims.Add(new Claim("role", "junior"));
 
         var token = new JwtSecurityToken(
             claims: claims,

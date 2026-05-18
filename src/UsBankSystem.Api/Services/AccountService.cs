@@ -5,6 +5,7 @@ using UsBankSystem.Core.Domain.Accounts;
 using UsBankSystem.Core.Domain.Cards;
 using UsBankSystem.Core.Domain.Common;
 using Account = UsBankSystem.Core.Entities.Account;
+using UsBankSystem.Core.Entities;
 using UsBankSystem.Infrastructure.Persistence;
 
 namespace UsBankSystem.Api.Services;
@@ -59,12 +60,13 @@ public class AccountService(AppDbContext db)
 
     public async Task<List<AccountResponse>> GetAllAsync(Guid userId)
     {
-        var juniorAccountIds = await db.JuniorAccounts
+        var otherJuniorAccountIds = await db.JuniorAccounts
+            .Where(j => j.Account.UserId != userId)
             .Select(j => j.AccountId)
             .ToListAsync();
 
         return await db.Accounts
-            .Where(a => a.UserId == userId && !juniorAccountIds.Contains(a.Id))
+            .Where(a => a.UserId == userId && !otherJuniorAccountIds.Contains(a.Id))
             .OrderBy(a => a.CreatedAt)
             .Select(a => new AccountResponse
             {
@@ -165,16 +167,21 @@ public class AccountService(AppDbContext db)
 
         if (parentAccount.UserId != userId)
             throw new UnauthorizedAccessException("Access denied");
+
         return await db.JuniorAccounts
             .Include(j => j.Account)
+            .ThenInclude(a => a.User)
+            .Include(j => j.Account)
             .ThenInclude(a => a.Cards)
-            .Where(j => j.ParentAccountId == parentAccountId)
+            .Where(j => j.ParentUserId == userId)
             .OrderBy(j => j.CreatedAt)
             .Select(j => new JuniorAccountResponse
             {
                 JuniorAccountId = j.Id,
                 AccountId = j.AccountId,
                 AccountNumber = j.Account.AccountNumber,
+                FirstName = j.Account.User.FirstName,
+                LastName = j.Account.User.LastName,
                 Balance = j.Account.Balance,
                 Currency = j.Account.Currency,
                 Status = j.Account.Status,
@@ -199,10 +206,27 @@ public class AccountService(AppDbContext db)
         var parentAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ParentAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
                             ?? throw new KeyNotFoundException("Parent account not found or inactive");
 
+        var emailTaken = await db.Users.AnyAsync(u => u.Email == request.Email.ToLowerInvariant());
+        if (emailTaken)
+            throw new InvalidOperationException("Email is already taken");
+
+        var juniorUser = new User
+        {
+            Id = Guid.NewGuid(),
+            Email = request.Email.ToLowerInvariant(),
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+            FirstName = request.FirstName,
+            LastName = request.LastName,
+            Status = AccountStatus.Active,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        db.Users.Add(juniorUser);
+
         var juniorAccount = new Account
         {
             Id = Guid.NewGuid(),
-            UserId = userId,
+            UserId = juniorUser.Id,
             AccountNumber = await GenerateAccountNumberAsync(db),
             Type = AccountType.Checking,
             Currency = CurrencyCode.USD,
@@ -218,7 +242,7 @@ public class AccountService(AppDbContext db)
         {
             Id = Guid.NewGuid(),
             AccountId = juniorAccount.Id,
-            ParentAccountId = parentAccount.Id,
+            ParentUserId = userId,
             DateOfBirth = request.DateOfBirth,
             CreatedAt = DateTime.UtcNow
         };
@@ -231,6 +255,8 @@ public class AccountService(AppDbContext db)
             JuniorAccountId = juniorLink.Id,
             AccountId = juniorAccount.Id,
             AccountNumber = juniorAccount.AccountNumber,
+            FirstName = juniorUser.FirstName,
+            LastName = juniorUser.LastName,
             Balance = juniorAccount.Balance,
             Currency = juniorAccount.Currency,
             Status = juniorAccount.Status,
@@ -240,7 +266,7 @@ public class AccountService(AppDbContext db)
             CreatedAt = juniorLink.CreatedAt
         };
     }
-    
+
     private static async Task<string> GenerateAccountNumberAsync(AppDbContext db)
     {
         string accountNumber;
