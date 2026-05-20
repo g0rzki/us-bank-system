@@ -267,6 +267,44 @@ public class AccountService(AppDbContext db)
         };
     }
 
+	public async Task<CardResponse> UpdateJuniorLimitAsync(Guid userId, Guid juniorAccountId, UpdateJuniorLimitRequest request)
+	{
+    	if (request.DailyLimit is null && request.MonthlyLimit is null)
+        	throw new ArgumentException("At least one limit (DailyLimit or MonthlyLimit) must be provided");
+
+    	var juniorLink = await db.JuniorAccounts
+        	.FirstOrDefaultAsync(j => j.AccountId == juniorAccountId)
+        	?? throw new KeyNotFoundException("Junior account not found");
+
+    	if (juniorLink.ParentUserId != userId)
+        	throw new UnauthorizedAccessException("Access denied");
+
+    	var card = await db.Cards
+        	.FirstOrDefaultAsync(c => c.AccountId == juniorAccountId && c.Type == CardType.Prepaid && c.Status == CardStatus.Active)
+        	?? throw new KeyNotFoundException("No active prepaid card found for this junior account");
+
+    	if (request.DailyLimit.HasValue)
+        	card.DailyLimit = request.DailyLimit.Value;
+
+    	if (request.MonthlyLimit.HasValue)
+        	card.MonthlyLimit = request.MonthlyLimit.Value;
+
+    	await db.SaveChangesAsync();
+
+    	return new CardResponse
+    	{
+        	Id = card.Id,
+        	AccountId = card.AccountId,
+        	Last4 = card.Last4,
+        	Type = card.Type,
+        	Status = card.Status,
+        	DailyLimit = card.DailyLimit,
+        	MonthlyLimit = card.MonthlyLimit,
+        	ExpiresAt = card.ExpiresAt,
+        	CreatedAt = card.CreatedAt
+    	};
+	}
+
     private static async Task<string> GenerateAccountNumberAsync(AppDbContext db)
     {
         string accountNumber;

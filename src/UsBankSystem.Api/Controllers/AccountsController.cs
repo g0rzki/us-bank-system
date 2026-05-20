@@ -89,4 +89,16 @@ public class AccountsController(AccountService accountService) : ControllerBase
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
+    [HttpPatch("{id:guid}/junior-limit")]
+    [ProducesResponseType(typeof(CardResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateJuniorLimit(Guid id, [FromBody] UpdateJuniorLimitRequest request)
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        var result = await accountService.UpdateJuniorLimitAsync(userId, id, request);
+        return Ok(result);
+    }
 }
