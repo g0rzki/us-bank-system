@@ -49,7 +49,7 @@ public class CreateJuniorAccountTests
         var authService = new AuthService(db, CreateConfig());
         await authService.RegisterAsync(new RegisterRequest
         {
-            Email = "test@example.com",
+            Email = "parent@example.com",
             Password = "Password123!",
             FirstName = "Jan",
             LastName = "Kowalski"
@@ -64,16 +64,22 @@ public class CreateJuniorAccountTests
     private static DateOnly ValidDateOfBirth() =>
         DateOnly.FromDateTime(DateTime.UtcNow.AddYears(-10));
 
+    private static CreateJuniorAccountRequest ValidRequest(Guid parentAccountId) => new()
+    {
+        ParentAccountId = parentAccountId,
+        Email = "junior@example.com",
+        Password = "Password123!",
+        FirstName = "Emma",
+        LastName = "Doe",
+        DateOfBirth = ValidDateOfBirth()
+    };
+
     [Fact]
     public async Task CreateJunior_ValidRequest_Returns201()
     {
         var (db, userId, parentAccountId) = await Setup();
         var controller = CreateController(db, userId);
-        var result = await controller.CreateJunior(new CreateJuniorAccountRequest
-        {
-            ParentAccountId = parentAccountId,
-            DateOfBirth = ValidDateOfBirth()
-        });
+        var result = await controller.CreateJunior(ValidRequest(parentAccountId));
         var created = Assert.IsType<ObjectResult>(result);
         Assert.Equal(201, created.StatusCode);
     }
@@ -84,11 +90,9 @@ public class CreateJuniorAccountTests
         var (db, userId, parentAccountId) = await Setup();
         var controller = CreateController(db, userId);
         var dob = ValidDateOfBirth();
-        var result = await controller.CreateJunior(new CreateJuniorAccountRequest
-        {
-            ParentAccountId = parentAccountId,
-            DateOfBirth = dob
-        });
+        var req = ValidRequest(parentAccountId);
+        req.DateOfBirth = dob;
+        var result = await controller.CreateJunior(req);
         var created = Assert.IsType<ObjectResult>(result);
         var response = Assert.IsType<JuniorAccountResponse>(created.Value);
         Assert.Equal(dob, response.DateOfBirth);
@@ -101,11 +105,7 @@ public class CreateJuniorAccountTests
     {
         var (db, userId, parentAccountId) = await Setup();
         var controller = CreateController(db, userId);
-        await controller.CreateJunior(new CreateJuniorAccountRequest
-        {
-            ParentAccountId = parentAccountId,
-            DateOfBirth = ValidDateOfBirth()
-        });
+        await controller.CreateJunior(ValidRequest(parentAccountId));
         Assert.Equal(1, await db.JuniorAccounts.CountAsync());
         Assert.Equal(2, await db.Accounts.CountAsync());
     }
@@ -115,12 +115,9 @@ public class CreateJuniorAccountTests
     {
         var (db, userId, parentAccountId) = await Setup();
         var controller = CreateController(db, userId);
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            controller.CreateJunior(new CreateJuniorAccountRequest
-            {
-                ParentAccountId = parentAccountId,
-                DateOfBirth = DateOnly.FromDateTime(DateTime.UtcNow.AddYears(-5))
-            }));
+        var req = ValidRequest(parentAccountId);
+        req.DateOfBirth = DateOnly.FromDateTime(DateTime.UtcNow.AddYears(-5));
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateJunior(req));
     }
 
     [Fact]
@@ -128,12 +125,9 @@ public class CreateJuniorAccountTests
     {
         var (db, userId, parentAccountId) = await Setup();
         var controller = CreateController(db, userId);
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            controller.CreateJunior(new CreateJuniorAccountRequest
-            {
-                ParentAccountId = parentAccountId,
-                DateOfBirth = DateOnly.FromDateTime(DateTime.UtcNow.AddYears(-15))
-            }));
+        var req = ValidRequest(parentAccountId);
+        req.DateOfBirth = DateOnly.FromDateTime(DateTime.UtcNow.AddYears(-15));
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateJunior(req));
     }
 
     [Fact]
@@ -141,12 +135,9 @@ public class CreateJuniorAccountTests
     {
         var (db, userId, parentAccountId) = await Setup();
         var controller = CreateController(db, userId);
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            controller.CreateJunior(new CreateJuniorAccountRequest
-            {
-                ParentAccountId = parentAccountId,
-                DateOfBirth = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1))
-            }));
+        var req = ValidRequest(parentAccountId);
+        req.DateOfBirth = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
+        await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateJunior(req));
     }
 
     [Fact]
@@ -154,12 +145,8 @@ public class CreateJuniorAccountTests
     {
         var (db, userId, _) = await Setup();
         var controller = CreateController(db, userId);
-        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
-            controller.CreateJunior(new CreateJuniorAccountRequest
-            {
-                ParentAccountId = Guid.NewGuid(),
-                DateOfBirth = ValidDateOfBirth()
-            }));
+        var req = ValidRequest(Guid.NewGuid());
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => controller.CreateJunior(req));
     }
 
     [Fact]
@@ -168,11 +155,7 @@ public class CreateJuniorAccountTests
         var (db, _, parentAccountId) = await Setup();
         var otherUserId = Guid.NewGuid();
         var controller = CreateController(db, otherUserId);
-        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
-            controller.CreateJunior(new CreateJuniorAccountRequest
-            {
-                ParentAccountId = parentAccountId,
-                DateOfBirth = ValidDateOfBirth()
-            }));
+        var req = ValidRequest(parentAccountId);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => controller.CreateJunior(req));
     }
 }
