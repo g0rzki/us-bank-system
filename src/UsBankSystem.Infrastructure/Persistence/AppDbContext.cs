@@ -99,12 +99,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithOne()
                 .HasForeignKey<JuniorAccount>(j => j.AccountId)
                 .OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(j => j.ParentAccount)
+            e.HasOne(j => j.ParentUser)
                 .WithMany()
-                .HasForeignKey(j => j.ParentAccountId)
+                .HasForeignKey(j => j.ParentUserId)
                 .OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(j => j.AccountId).IsUnique();
-            e.HasIndex(j => j.ParentAccountId);
+            e.HasIndex(j => j.ParentUserId);
         });
     }
 }

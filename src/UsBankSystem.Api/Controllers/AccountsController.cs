@@ -88,4 +88,5 @@ public class AccountsController(AccountService accountService) : ControllerBase
         var result = await accountService.CreateJuniorAsync(userId, request);
         return StatusCode(StatusCodes.Status201Created, result);
     }
+
 }

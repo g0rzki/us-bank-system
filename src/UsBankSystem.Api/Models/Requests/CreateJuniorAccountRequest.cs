@@ -8,5 +8,19 @@ public class CreateJuniorAccountRequest
     public Guid ParentAccountId { get; set; }
 
     [Required]
+    [EmailAddress]
+    public string Email { get; set; } = null!;
+
+    [Required]
+    [MinLength(8)]
+    public string Password { get; set; } = null!;
+
+    [Required]
+    public string FirstName { get; set; } = null!;
+
+    [Required]
+    public string LastName { get; set; } = null!;
+
+    [Required]
     public DateOnly DateOfBirth { get; set; }
 }

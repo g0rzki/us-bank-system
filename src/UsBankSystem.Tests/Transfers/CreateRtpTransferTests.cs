@@ -76,7 +76,7 @@ public class CreateRtpTransferTests
         return controller;
     }
 
-    private async Task<(AppDbContext db, Guid userId, Guid fromAccountId, Guid toAccountId)> Setup()
+    private async Task<(AppDbContext db, Guid userId, Guid fromAccountId, string toAccountNumber)> Setup()
     {
         var db = CreateDb();
         var authService = new AuthService(db, CreateConfig());
@@ -105,18 +105,18 @@ public class CreateRtpTransferTests
         var accounts = await db.Accounts.ToListAsync();
         accounts[0].Balance = 1000m;
         await db.SaveChangesAsync();
-        return (db, user.Id, accounts[0].Id, accounts[1].Id);
+        return (db, user.Id, accounts[0].Id, accounts[1].AccountNumber);
     }
 
     [Fact]
     public async Task CreateRtp_ValidRequest_Returns201()
     {
-        var (db, userId, fromAccountId, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
         var controller = CreateController(db, userId);
         var result = await controller.CreateRtp(new CreateRtpTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountId = toAccountId,
+            ToAccountNumber = toAccountNumber,
             Amount = 100m
         });
         var created = Assert.IsType<ObjectResult>(result);
@@ -126,16 +126,16 @@ public class CreateRtpTransferTests
     [Fact]
     public async Task CreateRtp_BalanceUpdatedImmediately()
     {
-        var (db, userId, fromAccountId, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
         var controller = CreateController(db, userId);
         await controller.CreateRtp(new CreateRtpTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountId = toAccountId,
+            ToAccountNumber = toAccountNumber,
             Amount = 100m
         });
         var fromAccount = await db.Accounts.FindAsync(fromAccountId);
-        var toAccount = await db.Accounts.FindAsync(toAccountId);
+        var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == toAccountNumber);
         Assert.Equal(900m, fromAccount!.Balance);
         Assert.Equal(100m, toAccount!.Balance);
         Assert.Equal(0m, fromAccount.ReservedBalance);
@@ -144,12 +144,12 @@ public class CreateRtpTransferTests
     [Fact]
     public async Task CreateRtp_StatusCompleted()
     {
-        var (db, userId, fromAccountId, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
         var controller = CreateController(db, userId);
         await controller.CreateRtp(new CreateRtpTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountId = toAccountId,
+            ToAccountNumber = toAccountNumber,
             Amount = 100m
         });
         var transfer = await db.Transfers.FirstAsync();
@@ -159,12 +159,12 @@ public class CreateRtpTransferTests
     [Fact]
     public async Task CreateRtp_TwoTransactionsCreated()
     {
-        var (db, userId, fromAccountId, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
         var controller = CreateController(db, userId);
         await controller.CreateRtp(new CreateRtpTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountId = toAccountId,
+            ToAccountNumber = toAccountNumber,
             Amount = 100m
         });
         Assert.Equal(2, await db.Transactions.CountAsync());
@@ -173,12 +173,12 @@ public class CreateRtpTransferTests
     [Fact]
     public async Task CreateRtp_InsufficientFunds_Throws()
     {
-        var (db, userId, fromAccountId, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
         var controller = CreateController(db, userId);
         await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateRtp(new CreateRtpTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountId = toAccountId,
+            ToAccountNumber = toAccountNumber,
             Amount = 9999m
         }));
     }
@@ -186,12 +186,12 @@ public class CreateRtpTransferTests
     [Fact]
     public async Task CreateRtp_GatewayFailure_ThrowsAndReleasesReservation()
     {
-        var (db, userId, fromAccountId, toAccountId) = await Setup();
+        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
         var controller = CreateController(db, userId, HttpStatusCode.BadRequest);
         await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateRtp(new CreateRtpTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountId = toAccountId,
+            ToAccountNumber = toAccountNumber,
             Amount = 100m
         }));
         var account = await db.Accounts.FindAsync(fromAccountId);
