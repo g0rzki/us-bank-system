@@ -5,6 +5,7 @@ public class Transfer
     public Guid Id { get; set; }
     public Guid FromAccountId { get; set; }
     public Guid? ToAccountId { get; set; }          // null przy transferach zewnętrznych
+    public string? ToAccountNumber { get; set; }    // numer konta odbiorcy (zewnętrzny lub wewnętrzny)
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
     public string Channel { get; set; } = null!;    // internal | ach | rtp | fednow | swift

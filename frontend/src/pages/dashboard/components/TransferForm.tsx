@@ -8,6 +8,7 @@ import {
     createSwiftTransfer,
 } from '../../../api/transfers';
 import '../../../styles/TransferForm.css';
+import { useToast } from '../../../context/ToastContext';
 
 type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift';
 
@@ -40,40 +41,39 @@ export default function TransferForm({ accounts, onSuccess, onCancel, initialCha
     const [beneficiaryAddress, setBeneficiaryAddress] = useState('');
     const [chargeBearer, setChargeBearer] = useState('SHA');
     const [remittanceInfo, setRemittanceInfo] = useState('');
+    const { showToast } = useToast();
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
 
     const info = CHANNEL_INFO[channel];
 
     const handleSubmit = async () => {
-        setError(null);
         const amt = parseFloat(amount);
         if (!amount || isNaN(amt) || amt <= 0) {
-            setError('Enter a valid amount');
+            showToast('Enter a valid amount');
             return;
         }
 
         setLoading(true);
         try {
             if (channel === 'internal') {
-                if (!toAccountId) { setError('Select destination account'); return; }
+                if (!toAccountId) { showToast('Select destination account'); return; }
                 await createInternalTransfer({ fromAccountId, toAccountId, amount: amt, currency: 'USD', description: description || undefined });
             } else if (channel === 'ach') {
-                if (!toRoutingNumber || !toAccountNumber) { setError('Routing and account numbers are required'); return; }
+                if (!toRoutingNumber || !toAccountNumber) { showToast('Routing and account numbers are required'); return; }
                 await createAchTransfer({ fromAccountId, toRoutingNumber, toAccountNumber, amount: amt, currency: 'USD', description: description || undefined });
             } else if (channel === 'rtp') {
-                if (!toAccountNumber) { setError('Enter recipient account number'); return; }
+                if (!toAccountNumber) { showToast('Enter recipient account number'); return; }
                 await createRtpTransfer({ fromAccountId, toAccountNumber, amount: amt, currency: 'USD', description: description || undefined });
             } else if (channel === 'fednow') {
-                if (!toAccountNumber) { setError('Enter recipient account number'); return; }
+                if (!toAccountNumber) { showToast('Enter recipient account number'); return; }
                 await createFedNowTransfer({ fromAccountId, toAccountNumber, amount: amt, currency: 'USD', description: description || undefined });
             } else if (channel === 'swift') {
-                if (!iban || !bic || !beneficiaryName) { setError('IBAN, BIC and beneficiary name are required'); return; }
+                if (!iban || !bic || !beneficiaryName) { showToast('IBAN, BIC and beneficiary name are required'); return; }
                 await createSwiftTransfer({ fromAccountId, iban, bic, beneficiaryName, beneficiaryAddress: beneficiaryAddress || undefined, amount: amt, currency: 'USD', chargeBearer, remittanceInfo: remittanceInfo || undefined, description: description || undefined });
             }
             onSuccess();
         } catch (e: any) {
-            setError(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Transfer failed. Please try again.');
+            showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Transfer failed. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -206,8 +206,6 @@ export default function TransferForm({ accounts, onSuccess, onCancel, initialCha
                         <input value={description} onChange={e => setDescription(e.target.value)} placeholder="What's this for?" />
                     </div>
                 </div>
-
-                {error && <p className="tf-error">{error}</p>}
 
                 <div className="tf-actions">
                     <button className="tf-btn-cancel" onClick={onCancel} disabled={loading}>Cancel</button>

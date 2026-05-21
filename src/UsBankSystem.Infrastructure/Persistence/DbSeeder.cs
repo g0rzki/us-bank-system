@@ -103,59 +103,53 @@ public static class DbSeeder
 
         context.Accounts.AddRange(account1Checking, account1Savings, account2Checking, account3Checking);
 
+        // Transfer GUIDs — stałe żeby transakcje mogły się do nich odwoływać
+        var trMonthlySavings   = Guid.Parse("bbbb0001-0000-0000-0000-000000000001");
+        var trRentSplit        = Guid.Parse("bbbb0001-0000-0000-0000-000000000002");
+        var trFreelance        = Guid.Parse("bbbb0001-0000-0000-0000-000000000003");
+        var trDinnerSplit      = Guid.Parse("bbbb0001-0000-0000-0000-000000000004");
+        var trExternal         = Guid.Parse("bbbb0001-0000-0000-0000-000000000005");
+        var trInvoiceFailed    = Guid.Parse("bbbb0001-0000-0000-0000-000000000006");
+        var trRentPending      = Guid.Parse("bbbb0001-0000-0000-0000-000000000007");
+        var trSwiftPending     = Guid.Parse("bbbb0001-0000-0000-0000-000000000008");
+        var trRtpPending       = Guid.Parse("bbbb0001-0000-0000-0000-000000000009");
+
         // Transactions
         var transactions = new List<Transaction>
         {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                AccountId = account1Checking.Id,
-                Amount = 3500.00m,
-                Type = "credit",
-                Status = "completed",
-                Description = "Payroll deposit",
-                CreatedAt = DateTime.UtcNow.AddDays(-14)
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                AccountId = account1Checking.Id,
-                Amount = 150.00m,
-                Type = "debit",
-                Status = "completed",
-                Description = "Grocery store",
-                CreatedAt = DateTime.UtcNow.AddDays(-10)
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                AccountId = account1Checking.Id,
-                Amount = 89.99m,
-                Type = "debit",
-                Status = "completed",
-                Description = "Online subscription",
-                CreatedAt = DateTime.UtcNow.AddDays(-5)
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                AccountId = account2Checking.Id,
-                Amount = 2500.00m,
-                Type = "credit",
-                Status = "completed",
-                Description = "Payroll deposit",
-                CreatedAt = DateTime.UtcNow.AddDays(-7)
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                AccountId = account2Checking.Id,
-                Amount = 45.50m,
-                Type = "debit",
-                Status = "completed",
-                Description = "Gas station",
-                CreatedAt = DateTime.UtcNow.AddDays(-3)
-            }
+            // account1Checking (john.doe)
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 3500.00m, Type = "credit",  Status = "completed", Description = "Payroll deposit",        CreatedAt = DateTime.UtcNow.AddDays(-30) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 1200.00m, Type = "debit",   Status = "completed", Description = "Rent",                   CreatedAt = DateTime.UtcNow.AddDays(-29) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 85.40m,   Type = "debit",   Status = "completed", Description = "Grocery store",          CreatedAt = DateTime.UtcNow.AddDays(-27) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 9.99m,    Type = "debit",   Status = "completed", Description = "Netflix",                CreatedAt = DateTime.UtcNow.AddDays(-25) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 3500.00m, Type = "credit",  Status = "completed", Description = "Payroll deposit",        CreatedAt = DateTime.UtcNow.AddDays(-16) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 62.30m,   Type = "debit",   Status = "completed", Description = "Gas station",            CreatedAt = DateTime.UtcNow.AddDays(-15) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 340.00m,  Type = "debit",   Status = "completed", Description = "Electricity bill",       CreatedAt = DateTime.UtcNow.AddDays(-14) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 120.50m,  Type = "debit",   Status = "completed", Description = "Grocery store",          CreatedAt = DateTime.UtcNow.AddDays(-12) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 500.00m,  Type = "debit",   Status = "completed", Description = "Monthly savings",        ReferenceId = trMonthlySavings.ToString(), CreatedAt = DateTime.UtcNow.AddDays(-12) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 47.20m,   Type = "debit",   Status = "completed", Description = "Restaurant",             CreatedAt = DateTime.UtcNow.AddDays(-10) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 200.00m,  Type = "debit",   Status = "completed", Description = "Rent split",             ReferenceId = trRentSplit.ToString(),     CreatedAt = DateTime.UtcNow.AddDays(-8) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 89.99m,   Type = "debit",   Status = "completed", Description = "Online subscription",    CreatedAt = DateTime.UtcNow.AddDays(-5) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 350.00m,  Type = "debit",   Status = "completed", Description = "Freelance payment",      ReferenceId = trFreelance.ToString(),     CreatedAt = DateTime.UtcNow.AddDays(-6) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 75.50m,   Type = "debit",   Status = "completed", Description = "Dinner split",           ReferenceId = trDinnerSplit.ToString(),   CreatedAt = DateTime.UtcNow.AddDays(-3) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 120.00m,  Type = "debit",   Status = "failed",    Description = "Invoice payment",        ReferenceId = trInvoiceFailed.ToString(), CreatedAt = DateTime.UtcNow.AddDays(-2) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 32.00m,   Type = "debit",   Status = "completed", Description = "Pharmacy",               CreatedAt = DateTime.UtcNow.AddDays(-2) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 14.99m,   Type = "debit",   Status = "completed", Description = "Spotify",                CreatedAt = DateTime.UtcNow.AddDays(-1) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 850.00m,  Type = "debit",   Status = "pending",   Description = "Rent payment",           ReferenceId = trRentPending.ToString(),   CreatedAt = DateTime.UtcNow.AddHours(-3) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 2400.00m, Type = "debit",   Status = "pending",   Description = "International invoice",  ReferenceId = trSwiftPending.ToString(),  CreatedAt = DateTime.UtcNow.AddHours(-1) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Checking.Id, Amount = 45.00m,   Type = "debit",   Status = "pending",   Description = "Dinner split",           ReferenceId = trRtpPending.ToString(),    CreatedAt = DateTime.UtcNow.AddMinutes(-20) },
+
+            // account1Savings (john.doe)
+            new() { Id = Guid.NewGuid(), AccountId = account1Savings.Id,  Amount = 500.00m,  Type = "credit",  Status = "completed", Description = "Transfer from checking", ReferenceId = trMonthlySavings.ToString(), CreatedAt = DateTime.UtcNow.AddDays(-12) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Savings.Id,  Amount = 500.00m,  Type = "credit",  Status = "completed", Description = "Transfer from checking", CreatedAt = DateTime.UtcNow.AddDays(-30) },
+            new() { Id = Guid.NewGuid(), AccountId = account1Savings.Id,  Amount = 15.00m,   Type = "credit",  Status = "pending",   Description = "Savings contribution",   CreatedAt = DateTime.UtcNow.AddHours(-1) },
+
+            // account2Checking (jane.smith)
+            new() { Id = Guid.NewGuid(), AccountId = account2Checking.Id, Amount = 2500.00m, Type = "credit",  Status = "completed", Description = "Payroll deposit",        CreatedAt = DateTime.UtcNow.AddDays(-7) },
+            new() { Id = Guid.NewGuid(), AccountId = account2Checking.Id, Amount = 45.50m,   Type = "debit",   Status = "completed", Description = "Gas station",            CreatedAt = DateTime.UtcNow.AddDays(-3) },
+            new() { Id = Guid.NewGuid(), AccountId = account2Checking.Id, Amount = 200.00m,  Type = "credit",  Status = "completed", Description = "Rent split received",    ReferenceId = trRentSplit.ToString(),     CreatedAt = DateTime.UtcNow.AddDays(-8) },
+            new() { Id = Guid.NewGuid(), AccountId = account2Checking.Id, Amount = 350.00m,  Type = "credit",  Status = "completed", Description = "Freelance payment",      ReferenceId = trFreelance.ToString(),     CreatedAt = DateTime.UtcNow.AddDays(-6) },
+            new() { Id = Guid.NewGuid(), AccountId = account2Checking.Id, Amount = 75.50m,   Type = "credit",  Status = "completed", Description = "Dinner split",           ReferenceId = trDinnerSplit.ToString(),   CreatedAt = DateTime.UtcNow.AddDays(-3) },
         };
 
         context.Transactions.AddRange(transactions);
@@ -165,9 +159,10 @@ public static class DbSeeder
         {
             new()
             {
-                Id = Guid.NewGuid(),
+                Id = trMonthlySavings,
                 FromAccountId = account1Checking.Id,
                 ToAccountId = account1Savings.Id,
+                ToAccountNumber = account1Savings.AccountNumber,
                 Amount = 500.00m,
                 Currency = "USD",
                 Channel = "internal",
@@ -178,9 +173,10 @@ public static class DbSeeder
             },
             new()
             {
-                Id = Guid.NewGuid(),
+                Id = trRentSplit,
                 FromAccountId = account1Checking.Id,
                 ToAccountId = account2Checking.Id,
+                ToAccountNumber = account2Checking.AccountNumber,
                 Amount = 200.00m,
                 Currency = "USD",
                 Channel = "internal",
@@ -191,9 +187,10 @@ public static class DbSeeder
             },
             new()
             {
-                Id = Guid.NewGuid(),
+                Id = trFreelance,
                 FromAccountId = account1Checking.Id,
                 ToAccountId = account2Checking.Id,
+                ToAccountNumber = account2Checking.AccountNumber,
                 Amount = 350.00m,
                 Currency = "USD",
                 Channel = "rtp",
@@ -205,9 +202,10 @@ public static class DbSeeder
             },
             new()
             {
-                Id = Guid.NewGuid(),
+                Id = trDinnerSplit,
                 FromAccountId = account1Checking.Id,
                 ToAccountId = account2Checking.Id,
+                ToAccountNumber = account2Checking.AccountNumber,
                 Amount = 75.50m,
                 Currency = "USD",
                 Channel = "fednow",
@@ -219,9 +217,10 @@ public static class DbSeeder
             },
             new()
             {
-                Id = Guid.NewGuid(),
+                Id = trExternal,
                 FromAccountId = account2Checking.Id,
                 ToAccountId = null,
+                ToAccountNumber = "062100018-9876543210",
                 Amount = 1000.00m,
                 Currency = "USD",
                 Channel = "ach",
@@ -232,9 +231,10 @@ public static class DbSeeder
             },
             new()
             {
-                Id = Guid.NewGuid(),
+                Id = trInvoiceFailed,
                 FromAccountId = account1Checking.Id,
                 ToAccountId = account3Checking.Id,
+                ToAccountNumber = account3Checking.AccountNumber,
                 Amount = 120.00m,
                 Currency = "USD",
                 Channel = "ach",
@@ -242,6 +242,51 @@ public static class DbSeeder
                 ExternalReferenceId = "ACH-2024-001235",
                 Description = "Invoice payment",
                 CreatedAt = DateTime.UtcNow.AddDays(-2)
+            },
+            new()
+            {
+                Id = trRentPending,
+                FromAccountId = account1Checking.Id,
+                ToAccountId = null,
+                ToAccountNumber = "021000021-1234567890",
+                Amount = 850.00m,
+                Currency = "USD",
+                Channel = "ach",
+                Status = TransferStatus.Pending,
+                ExternalReferenceId = "ACH-2024-002001",
+                Description = "Rent payment",
+                RequiresApproval = false,
+                CreatedAt = DateTime.UtcNow.AddHours(-3)
+            },
+            new()
+            {
+                Id = trSwiftPending,
+                FromAccountId = account1Checking.Id,
+                ToAccountId = null,
+                ToAccountNumber = "DE89370400440532013000",
+                Amount = 2400.00m,
+                Currency = "USD",
+                Channel = "swift",
+                Status = TransferStatus.Pending,
+                ExternalReferenceId = "SWIFT-2024-000088",
+                Description = "International invoice",
+                RequiresApproval = false,
+                CreatedAt = DateTime.UtcNow.AddHours(-1)
+            },
+            new()
+            {
+                Id = trRtpPending,
+                FromAccountId = account1Checking.Id,
+                ToAccountId = account2Checking.Id,
+                ToAccountNumber = account2Checking.AccountNumber,
+                Amount = 45.00m,
+                Currency = "USD",
+                Channel = "rtp",
+                Status = TransferStatus.Pending,
+                ExternalReferenceId = "RTP-2024-009912",
+                Description = "Dinner split",
+                RequiresApproval = false,
+                CreatedAt = DateTime.UtcNow.AddMinutes(-20)
             }
         };
 

@@ -43,6 +43,7 @@ public class RtpPaymentService(AppDbContext db, RtpGateway rtpGateway, IOptions<
             Id = Guid.NewGuid(),
             FromAccountId = fromAccount.Id,
             ToAccountId = toAccount.Id,
+            ToAccountNumber = toAccount.AccountNumber,
             Amount = request.Amount,
             Currency = request.Currency.ToUpperInvariant(),
             Channel = TransferChannel.Rtp,

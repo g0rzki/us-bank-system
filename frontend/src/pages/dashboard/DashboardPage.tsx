@@ -52,12 +52,6 @@ export default function DashboardPage() {
                         </button>
                     ))}
                 </nav>
-                <button className="db-theme-toggle" onClick={toggle}>
-                    <span>{dark ? 'Light mode' : 'Dark mode'}</span>
-                    <span className={`db-theme-track${dark ? ' on' : ''}`}>
-                        <span className="db-theme-thumb" />
-                    </span>
-                </button>
                 <button className="db-logout" onClick={logout}>Log out</button>
             </aside>
 
@@ -70,7 +64,7 @@ export default function DashboardPage() {
                         {view === 'accounts' && <AccountsView accounts={accounts} onAccountCreated={acc => setAccounts(prev => [...prev, acc])} />}
                         {view === 'transfers' && <TransfersView />}
                         {view === 'history' && <HistoryView accounts={accounts} />}
-                        {view === 'settings' && <SettingsView />}
+                        {view === 'settings' && <SettingsView dark={dark} onToggleTheme={toggle} />}
                     </>
                 )}
             </main>

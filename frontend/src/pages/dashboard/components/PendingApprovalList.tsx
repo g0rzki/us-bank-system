@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { approveTransfer, rejectTransfer } from '../../../api/transfers';
 import type { PendingApprovalTransfer } from '../../../api/transfers';
+import { useToast } from '../../../context/ToastContext';
 
 export default function PendingApprovalList({
     transfers,
@@ -9,37 +10,36 @@ export default function PendingApprovalList({
     transfers: PendingApprovalTransfer[];
     onResolved: (id: string) => void;
 }) {
+    const { showToast } = useToast();
     const [selected, setSelected] = useState<PendingApprovalTransfer | null>(null);
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
 
     const handle = async (action: 'approve' | 'reject') => {
         if (!selected) return;
         setLoading(true);
-        setError(null);
         try {
             if (action === 'approve') await approveTransfer(selected.id);
             else await rejectTransfer(selected.id);
             onResolved(selected.id);
             setSelected(null);
         } catch {
-            setError('Action failed. Please try again.');
+            showToast('Action failed. Please try again.');
         } finally {
             setLoading(false);
         }
     };
 
-    if (transfers.length === 0)
-        return <p className="db-empty">No transfers awaiting approval.</p>;
-
     return (
         <>
+            {transfers.length === 0 ? (
+                <p className="db-empty">No transfers awaiting approval.</p>
+            ) : (
             <div className="db-transfer-list">
                 {transfers.map(t => (
                     <button
                         key={t.id}
                         className="db-transfer-row"
-                        onClick={() => { setSelected(t); setError(null); }}
+                        onClick={() => setSelected(t)}
                     >
                         <div className="db-transfer-row-left">
                             <span className="db-transfer-channel">{t.channel.toUpperCase()}</span>
@@ -54,6 +54,7 @@ export default function PendingApprovalList({
                     </button>
                 ))}
             </div>
+            )}
 
             {selected && (
                 <div className="db-modal-overlay" onClick={() => !loading && setSelected(null)}>
@@ -81,7 +82,6 @@ export default function PendingApprovalList({
                             <span className="db-label">Date</span>
                             <span className="db-value-static">{new Date(selected.createdAt).toLocaleString()}</span>
                         </div>
-                        {error && <p className="db-error">{error}</p>}
                         <div className="db-form-actions">
                             <button className="db-btn-primary" onClick={() => handle('approve')} disabled={loading}>
                                 {loading ? '…' : 'Approve'}

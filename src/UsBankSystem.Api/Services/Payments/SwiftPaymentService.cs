@@ -41,6 +41,7 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
             Id = Guid.NewGuid(),
             FromAccountId = fromAccount.Id,
             ToAccountId = null,
+            ToAccountNumber = request.Iban,
             Amount = request.Amount,
             Currency = request.Currency.ToUpperInvariant(),
             Channel = TransferChannel.Swift,

@@ -2,7 +2,7 @@ import type { TransferStatus } from '../../../api/transfers';
 
 export default function TransferStatusCard({ status }: { status: TransferStatus }) {
     return (
-        <div className="db-transfer-status-card">
+        <div className="db-transfer-status-card" style={{ borderRadius: 0, border: 'none', borderTop: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
             <div className="db-transfer-status-row">
                 <span className="db-stat-label">Transfer ID</span>
                 <span className="db-transfer-id">{status.transferId}</span>

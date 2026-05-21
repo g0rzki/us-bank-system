@@ -42,6 +42,7 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
             Id = Guid.NewGuid(),
             FromAccountId = fromAccount.Id,
             ToAccountId = null,
+            ToAccountNumber = request.ToAccountNumber,
             Amount = request.Amount,
             Currency = request.Currency.ToUpperInvariant(),
             Channel = TransferChannel.Ach,

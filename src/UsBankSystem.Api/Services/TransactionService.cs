@@ -22,10 +22,43 @@ public class TransactionService(AppDbContext db)
             .OrderByDescending(t => t.CreatedAt);
 
         var total = await query.CountAsync();
-        var items = await query
+        var rawItems = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(t => new TransactionResponse
+            .Select(t => new { t.Id, t.Amount, t.Type, t.Status, t.Description, t.ReferenceId, t.CreatedAt })
+            .ToListAsync();
+
+        var transferIds = rawItems
+            .Where(t => t.ReferenceId != null && Guid.TryParse(t.ReferenceId, out _))
+            .Select(t => Guid.Parse(t.ReferenceId!))
+            .ToList();
+
+        var transferMap = await db.Transfers
+            .Where(tr => transferIds.Contains(tr.Id))
+            .Select(tr => new { tr.Id, tr.FromAccountId, tr.ToAccountNumber, tr.Channel })
+            .ToDictionaryAsync(tr => tr.Id);
+
+        var fromAccountNumbers = await db.Accounts
+            .Where(a => transferMap.Values.Select(tr => tr.FromAccountId).Contains(a.Id))
+            .Select(a => new { a.Id, a.AccountNumber })
+            .ToDictionaryAsync(a => a.Id, a => a.AccountNumber);
+
+        var items = rawItems.Select(t =>
+        {
+            string? counterparty = null;
+            if (t.ReferenceId != null && Guid.TryParse(t.ReferenceId, out var transferId)
+                && transferMap.TryGetValue(transferId, out var transfer))
+            {
+                counterparty = t.Type == "debit"
+                    ? transfer.ToAccountNumber
+                    : fromAccountNumbers.GetValueOrDefault(transfer.FromAccountId);
+            }
+            string? channel = null;
+            if (t.ReferenceId != null && Guid.TryParse(t.ReferenceId, out var tid2)
+                && transferMap.TryGetValue(tid2, out var tr2))
+                channel = tr2.Channel;
+
+            return new TransactionResponse
             {
                 Id = t.Id,
                 Amount = t.Amount,
@@ -33,9 +66,11 @@ public class TransactionService(AppDbContext db)
                 Status = t.Status,
                 Description = t.Description,
                 ReferenceId = t.ReferenceId,
-                CreatedAt = t.CreatedAt
-            })
-            .ToListAsync();
+                Channel = channel,
+                CreatedAt = t.CreatedAt,
+                CounterpartyAccountNumber = counterparty
+            };
+        }).ToList();
 
         return new PagedResponse<TransactionResponse>
         {

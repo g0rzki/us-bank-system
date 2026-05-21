@@ -8,6 +8,7 @@ import RegisterPage from './pages/auth/RegisterPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
 import KidPage from './pages/kid/KidPage';
 import { isAuthenticated, isJuniorAuthenticated } from './api/auth';
+import { ToastProvider } from './context/ToastContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -19,6 +20,7 @@ function KidProtectedRoute({ children }: { children: React.ReactNode }) {
 
 createRoot(document.getElementById('root')!).render(
     <StrictMode>
+        <ToastProvider>
         <BrowserRouter>
             <Routes>
                 <Route path="/" element={<LandingPage />} />
@@ -29,5 +31,6 @@ createRoot(document.getElementById('root')!).render(
                 <Route path="/kid" element={<KidProtectedRoute><KidPage /></KidProtectedRoute>} />
             </Routes>
         </BrowserRouter>
+        </ToastProvider>
     </StrictMode>
 );

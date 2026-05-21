@@ -6,15 +6,29 @@ import PendingApprovalList from '../components/PendingApprovalList';
 import { getAccounts } from '../../../api/accounts';
 import type { Account } from '../../../api/accounts';
 import TransferForm from '../components/TransferForm';
+import { useToast } from '../../../context/ToastContext';
+
+type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift';
+
+const CHANNEL_INFO: Record<Channel, { label: string; desc: string; settlement: string }> = {
+    internal: { label: 'Internal', desc: 'Between your accounts', settlement: 'Instant' },
+    ach: { label: 'ACH', desc: 'Standard bank transfer', settlement: 'T+1 business day' },
+    rtp: { label: 'RTP', desc: 'Real-time payment', settlement: 'Instant (24/7)' },
+    fednow: { label: 'FedNow', desc: 'Instant RTGS settlement', settlement: 'Instant' },
+    swift: { label: 'SWIFT', desc: 'International wire transfer', settlement: '1–5 business days' },
+};
+
+const ACTIVE_STATUSES = new Set(['pending', 'pending_approval', 'processing']);
 
 export default function TransfersView() {
+    const { showToast } = useToast();
     const [transfers, setTransfers] = useState<Transfer[]>([]);
     const [pendingApproval, setPendingApproval] = useState<PendingApprovalTransfer[]>([]);
     const [selected, setSelected] = useState<TransferStatus | null>(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     const [detailLoading, setDetailLoading] = useState(false);
     const [showForm, setShowForm] = useState(false);
+    const [channel, setChannel] = useState<Channel>('internal');
     const [accounts, setAccounts] = useState<Account[]>([]);
 
     useEffect(() => {
@@ -27,7 +41,7 @@ export default function TransfersView() {
             setPendingApproval(pending);
             setAccounts(accs);
         }).catch(() => {
-            setError('Failed to load transfers. Please try again.');
+            showToast('Failed to load transfers. Please try again.');
         }).finally(() => setLoading(false));
     }, []);
 
@@ -42,68 +56,13 @@ export default function TransfersView() {
         }
     };
 
-    const [channel, setChannel] = useState<Channel>('internal');
-    type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift';
-
-    const CHANNEL_INFO: Record<Channel, { label: string; desc: string; settlement: string }> = {
-        internal: { label: 'Internal', desc: 'Between your accounts', settlement: 'Instant' },
-        ach: { label: 'ACH', desc: 'Standard bank transfer', settlement: 'T+1 business day' },
-        rtp: { label: 'RTP', desc: 'Real-time payment', settlement: 'Instant (24/7)' },
-        fednow: { label: 'FedNow', desc: 'Instant RTGS settlement', settlement: 'Instant' },
-        swift: { label: 'SWIFT', desc: 'International wire transfer', settlement: '1–5 business days' },
-    };
+    const activeTransfers = transfers.filter(t => ACTIVE_STATUSES.has(t.status));
 
     return (
         <div className="db-view">
             <h1 className="db-view-title">Transfers</h1>
 
-            {error && <p className="db-error">{error}</p>}
-
-            {pendingApproval.length > 0 && (
-                <div className="db-section db-mb">
-                    <h2 className="db-section-title">Pending approval</h2>
-                    {loading ? (
-                        <div className="db-loading">Loading...</div>
-                    ) : (
-                        <PendingApprovalList
-                            transfers={pendingApproval}
-                            onResolved={id => setPendingApproval(prev => prev.filter(t => t.id !== id))}
-                        />
-                    )}
-                </div>
-            )}
-
             <div className="db-section db-mb">
-                <h2 className="db-section-title">Transfer history</h2>
-                {loading ? (
-                    <div className="db-loading">Loading...</div>
-                ) : transfers.length === 0 ? (
-                    <p className="db-empty">No transfers yet.</p>
-                ) : (
-                    <div className="db-transfer-list">
-                        {transfers.map(t => (
-                            <button
-                                key={t.id}
-                                className={`db-transfer-row${selected?.transferId === t.id ? ' active' : ''}`}
-                                onClick={() => handleSelect(t.id)}
-                            >
-                                <div className="db-transfer-row-left">
-                                    <span className="db-transfer-channel">{t.channel.toUpperCase()}</span>
-                                    <span className="db-tx-date">{new Date(t.createdAt).toLocaleDateString()}</span>
-                                </div>
-                                <div className="db-transfer-row-right">
-                                    <span className="db-tx-amount debit">${t.amount.toFixed(2)} {t.currency}</span>
-                                    <span className={`db-tx-status ${t.status.toLowerCase()}`}>{t.status}</span>
-                                </div>
-                            </button>
-                        ))}
-                    </div>
-                )}
-                {detailLoading && <div className="db-loading">Loading details...</div>}
-                {selected && !detailLoading && <TransferStatusCard status={selected} />}
-            </div>
-
-            <div className="db-section">
                 <h2 className="db-section-title">New transfer</h2>
                 <div className="db-transfer-grid">
                     {(Object.keys(CHANNEL_INFO) as Channel[]).map(ch => (
@@ -119,6 +78,52 @@ export default function TransfersView() {
                         </button>
                     ))}
                 </div>
+            </div>
+
+            <div className="db-section db-mb">
+                <h2 className="db-section-title">Pending approval</h2>
+                {loading ? (
+                    <div className="db-loading">Loading...</div>
+                ) : (
+                    <PendingApprovalList
+                        transfers={pendingApproval}
+                        onResolved={id => setPendingApproval(prev => prev.filter(t => t.id !== id))}
+                    />
+                )}
+            </div>
+
+            <div className="db-section">
+                <h2 className="db-section-title">In progress</h2>
+                {loading ? (
+                    <div className="db-loading">Loading...</div>
+                ) : activeTransfers.length === 0 ? (
+                    <p className="db-empty">No transfers in progress.</p>
+                ) : (
+                    <div className="db-transfer-list">
+                        {activeTransfers.map(t => (
+                                <div key={t.id} style={{ display: 'contents' }}>
+                                    <button
+                                        className={`db-transfer-row${selected?.transferId === t.id ? ' active' : ''}`}
+                                        onClick={() => handleSelect(t.id)}
+                                    >
+                                        <div className="db-transfer-row-left">
+                                            <span className="db-transfer-channel">{t.channel.toUpperCase()}</span>
+                                            <span className="db-tx-date">{new Date(t.createdAt).toLocaleDateString()}</span>
+                                        </div>
+                                        <div className="db-transfer-row-right">
+                                            <span className="db-tx-amount debit">${t.amount.toFixed(2)} {t.currency}</span>
+                                            <span className={`db-tx-status ${t.status.toLowerCase()}`}>{t.status}</span>
+                                        </div>
+                                    </button>
+                                    {selected?.transferId === t.id && (
+                                        detailLoading
+                                            ? <div className="db-loading" style={{ padding: '12px 16px' }}>Loading details...</div>
+                                            : <TransferStatusCard status={selected} />
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
             </div>
 
             {showForm && accounts.length > 0 && (
