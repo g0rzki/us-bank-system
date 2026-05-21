@@ -27,7 +27,6 @@ export default function TransfersView() {
     const [selected, setSelected] = useState<TransferStatus | null>(null);
     const [loading, setLoading] = useState(true);
     const [detailLoading, setDetailLoading] = useState(false);
-    const [showForm, setShowForm] = useState(false);
     const [channel, setChannel] = useState<Channel>('internal');
     const [accounts, setAccounts] = useState<Account[]>([]);
 
@@ -60,23 +59,34 @@ export default function TransfersView() {
 
     return (
         <div className="db-view">
-            <h1 className="db-view-title">Transfers</h1>
-
             <div className="db-section db-mb">
                 <h2 className="db-section-title">New transfer</h2>
-                <div className="db-transfer-grid">
-                    {(Object.keys(CHANNEL_INFO) as Channel[]).map(ch => (
-                        <button
-                            key={ch}
-                            className="db-transfer-card"
-                            onClick={() => { setChannel(ch); setShowForm(true); }}
-                            disabled={accounts.length === 0}
-                        >
-                            <span className="db-transfer-label">{CHANNEL_INFO[ch].label}</span>
-                            <span className="db-transfer-desc">{CHANNEL_INFO[ch].desc}</span>
-                            <span className="db-transfer-settlement">{CHANNEL_INFO[ch].settlement}</span>
-                        </button>
-                    ))}
+                <div className="db-surface">
+                    <div className="db-channel-tabs">
+                        {(Object.keys(CHANNEL_INFO) as Channel[]).map(ch => (
+                            <button
+                                key={ch}
+                                className={`db-channel-tab${channel === ch ? ' active' : ''}`}
+                                onClick={() => setChannel(ch)}
+                                disabled={accounts.length === 0}
+                            >
+                                <span className="db-channel-tab-label">{CHANNEL_INFO[ch].label}</span>
+                                <span className="db-channel-tab-desc">{CHANNEL_INFO[ch].desc}</span>
+                                <span className="db-channel-tab-settlement">{CHANNEL_INFO[ch].settlement}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="db-channel-form">
+                        {accounts.length === 0 ? (
+                            <p className="db-empty">You need an account to make a transfer.</p>
+                        ) : (
+                            <TransferForm
+                                accounts={accounts}
+                                channel={channel}
+                                onSuccess={() => getTransfers().then(setTransfers)}
+                            />
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -101,42 +111,30 @@ export default function TransfersView() {
                 ) : (
                     <div className="db-transfer-list">
                         {activeTransfers.map(t => (
-                                <div key={t.id} style={{ display: 'contents' }}>
-                                    <button
-                                        className={`db-transfer-row${selected?.transferId === t.id ? ' active' : ''}`}
-                                        onClick={() => handleSelect(t.id)}
-                                    >
-                                        <div className="db-transfer-row-left">
-                                            <span className="db-transfer-channel">{t.channel.toUpperCase()}</span>
-                                            <span className="db-tx-date">{new Date(t.createdAt).toLocaleDateString()}</span>
-                                        </div>
-                                        <div className="db-transfer-row-right">
-                                            <span className="db-tx-amount debit">${t.amount.toFixed(2)} {t.currency}</span>
-                                            <span className={`db-tx-status ${t.status.toLowerCase()}`}>{t.status}</span>
-                                        </div>
-                                    </button>
-                                    {selected?.transferId === t.id && (
-                                        detailLoading
-                                            ? <div className="db-loading" style={{ padding: '12px 16px' }}>Loading details...</div>
-                                            : <TransferStatusCard status={selected} />
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                            <div key={t.id} style={{ display: 'contents' }}>
+                                <button
+                                    className={`db-transfer-row${selected?.transferId === t.id ? ' active' : ''}`}
+                                    onClick={() => handleSelect(t.id)}
+                                >
+                                    <div className="db-transfer-row-left">
+                                        <span className="db-transfer-channel">{t.channel.toUpperCase()}</span>
+                                        <span className="db-tx-date">{new Date(t.createdAt).toLocaleDateString()}</span>
+                                    </div>
+                                    <div className="db-transfer-row-right">
+                                        <span className="db-tx-amount debit">${t.amount.toFixed(2)} {t.currency}</span>
+                                        <span className={`db-tx-status ${t.status.toLowerCase()}`}>{t.status}</span>
+                                    </div>
+                                </button>
+                                {selected?.transferId === t.id && (
+                                    detailLoading
+                                        ? <div className="db-loading" style={{ padding: '12px 16px' }}>Loading details...</div>
+                                        : <TransferStatusCard status={selected} />
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
-
-            {showForm && accounts.length > 0 && (
-                <TransferForm
-                    accounts={accounts}
-                    initialChannel={channel}
-                    onSuccess={() => {
-                        setShowForm(false);
-                        getTransfers().then(setTransfers);
-                    }}
-                    onCancel={() => setShowForm(false)}
-                />
-            )}
         </div>
     );
 }

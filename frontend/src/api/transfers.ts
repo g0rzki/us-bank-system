@@ -63,7 +63,7 @@ export async function getTransferStatus(transferId: string): Promise<TransferSta
 
 export interface CreateInternalTransferRequest {
     fromAccountId: string;
-    toAccountId: string;
+    toAccountNumber: string;
     amount: number;
     currency: string;
     description?: string;

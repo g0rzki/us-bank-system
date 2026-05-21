@@ -61,6 +61,7 @@ public class AuthService(AppDbContext db, IConfiguration config)
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email!),
+            new(JwtRegisteredClaimNames.GivenName, user.FirstName),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
         if (isJunior)

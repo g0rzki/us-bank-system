@@ -15,7 +15,7 @@
     border-right: 1px solid var(--color-border);
     display: flex;
     flex-direction: column;
-    padding: var(--spacing-lg) 0;
+    padding: var(--spacing-lg) 0 0 0;
     overflow: hidden;
 }
 
@@ -139,6 +139,7 @@
     flex: 1;
     height: 100%;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     padding: var(--spacing-xl);
     background: var(--color-bg);
 }
@@ -150,6 +151,8 @@
 
 .db-view {
     width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
 }
 
 .db-view-title {
@@ -237,8 +240,8 @@
 /* Account cards */
 .db-account-cards {
     display: flex;
+    flex-direction: column;
     gap: var(--spacing-md);
-    flex-wrap: wrap;
 }
 
 .db-account-cards-col {
@@ -247,18 +250,47 @@
     gap: var(--spacing-md);
 }
 
+.db-account-cards-scroll {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+}
+
+
 .db-account-card {
-    flex: 1;
     min-width: 200px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-left: 4px solid var(--color-primary);
     border-radius: var(--radius-card);
+    color: var(--color-text);
+    overflow: hidden;
+}
+
+.db-account-card-flip {
+    cursor: pointer;
+}
+
+.db-account-card-inner {
+    transition: transform 0.45s ease;
+    transform-style: preserve-3d;
+}
+
+.db-account-card-front,
+.db-account-card-back {
     padding: var(--spacing-lg);
     display: flex;
     flex-direction: column;
     gap: 6px;
-    color: var(--color-text);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+.db-account-card-back {
+    transform: rotateY(180deg);
+    position: absolute;
+    inset: 0;
+    justify-content: center;
 }
 
 .db-account-card-top {
@@ -276,6 +308,25 @@
 .db-account-status {
     font-size: var(--font-size-sm);
     color: var(--color-success);
+}
+
+.db-account-popup-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--spacing-md);
+    font-size: var(--font-size-sm);
+}
+
+.db-account-popup-label {
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+
+.db-account-popup-value {
+    color: var(--color-text);
+    font-weight: 500;
+    text-align: right;
 }
 
 .db-account-balance {
@@ -570,6 +621,14 @@
     margin-bottom: var(--spacing-md);
 }
 
+.db-transfer-item {
+    border-bottom: 1px solid var(--color-border);
+}
+
+.db-transfer-item:last-child {
+    border-bottom: none;
+}
+
 .db-transfer-row {
     display: flex;
     justify-content: space-between;
@@ -577,15 +636,10 @@
     width: 100%;
     padding: var(--spacing-md);
     border: none;
-    border-bottom: 1px solid var(--color-border);
     background: transparent;
     cursor: pointer;
     text-align: left;
     transition: background 0.15s;
-}
-
-.db-transfer-row:last-child {
-    border-bottom: none;
 }
 
 .db-transfer-row:hover,

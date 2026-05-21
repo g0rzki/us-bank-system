@@ -72,7 +72,7 @@ export default function HistoryView({ accounts }: { accounts: Account[] }) {
                                 const expanded = expandedId === tx.id;
                                 const isDebit = tx.type === 'debit';
                                 return (
-                                    <div key={tx.id} style={{ display: 'contents' }}>
+                                    <div key={tx.id} className="db-transfer-item">
                                         <button
                                             className={`db-transfer-row${expanded ? ' active' : ''}`}
                                             onClick={() => setExpandedId(expanded ? null : tx.id)}

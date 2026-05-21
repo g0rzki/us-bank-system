@@ -20,18 +20,30 @@ const NAV_ITEMS: { id: View; label: string }[] = [
     { id: 'settings', label: 'Settings' },
 ];
 
+function getFirstNameFromToken(): string {
+    const token = localStorage.getItem('token');
+    if (!token) return '';
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return payload['given_name'] ?? payload['firstName'] ?? '';
+    } catch {
+        return '';
+    }
+}
+
 export default function DashboardPage() {
     const [view, setView] = useState<View>('overview');
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loading, setLoading] = useState(true);
     const { dark, toggle } = useDarkMode();
+    const firstName = getFirstNameFromToken();
 
     useEffect(() => {
         getAccounts().then(async data => {
             setAccounts(data);
             if (data.length > 0) {
-                const tx = await getTransactions(data[0].id, 1, 5);
+                const tx = await getTransactions(data[0].id, 1, 10);
                 setTransactions(tx.items);
             }
         }).finally(() => setLoading(false));
@@ -60,7 +72,7 @@ export default function DashboardPage() {
                     <div className="db-loading">Loading...</div>
                 ) : (
                     <>
-                        {view === 'overview' && <OverviewView accounts={accounts} transactions={transactions} onNavigate={setView} />}
+                        {view === 'overview' && <OverviewView accounts={accounts} transactions={transactions} onNavigate={setView} firstName={firstName} />}
                         {view === 'accounts' && <AccountsView accounts={accounts} onAccountCreated={acc => setAccounts(prev => [...prev, acc])} />}
                         {view === 'transfers' && <TransfersView />}
                         {view === 'history' && <HistoryView accounts={accounts} />}

@@ -9,10 +9,8 @@ export default function AccountsView({ accounts, onAccountCreated }: {
     accounts: Account[];
     onAccountCreated: (account: Account) => void;
 }) {
-    const [showForm, setShowForm] = useState(false);
-    const [type, setType] = useState<'checking' | 'savings'>('checking');
     const { showToast } = useToast();
-    const [loading, setLoading] = useState(false);
+    const [loadingType, setLoadingType] = useState<'checking' | 'savings' | null>(null);
     const [juniorAccounts, setJuniorAccounts] = useState<JuniorAccount[]>([]);
     const [juniorLoading, setJuniorLoading] = useState(false);
     const [showJuniorForm, setShowJuniorForm] = useState(false);
@@ -51,22 +49,44 @@ export default function AccountsView({ accounts, onAccountCreated }: {
         }
     };
 
-    const handleSubmit = async () => {
-        setLoading(true);
+    const handleCreate = async (type: 'checking' | 'savings') => {
+        setLoadingType(type);
         try {
             const account = await createAccount(type);
             onAccountCreated(account);
-            setShowForm(false);
         } catch (e: any) {
             showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to create account. Please try again.');
         } finally {
-            setLoading(false);
+            setLoadingType(null);
         }
     };
 
+    const canCreateMore = true;
+
     return (
         <div className="db-view">
-            <h1 className="db-view-title">Accounts</h1>
+            <div className="db-section-header db-mb">
+                <h1 className="db-view-title" style={{ margin: 0 }}>Accounts</h1>
+                {canCreateMore && (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                            className="db-btn-secondary"
+                            onClick={() => handleCreate('checking')}
+                            disabled={loadingType !== null}
+                        >
+                            {loadingType === 'checking' ? 'Opening…' : '+ Checking account'}
+                        </button>
+                        <button
+                            className="db-btn-secondary"
+                            onClick={() => handleCreate('savings')}
+                            disabled={loadingType !== null}
+                        >
+                            {loadingType === 'savings' ? 'Opening…' : '+ Savings account'}
+                        </button>
+                    </div>
+                )}
+            </div>
+
             {accounts.length === 0 ? (
                 <p className="db-empty">No accounts yet.</p>
             ) : (
@@ -132,43 +152,6 @@ export default function AccountsView({ accounts, onAccountCreated }: {
                     <JuniorAccountList accounts={juniorAccounts} />
                 )}
             </div>
-
-            {showForm ? (
-                <div className="db-form-card db-mt">
-                    <h2 className="db-section-title">Open new account</h2>
-                    <div className="db-form-field">
-                        <label className="db-label">Account type</label>
-                        <div className="db-toggle-group">
-                            {(['checking', 'savings'] as const).map(t => (
-                                <button
-                                    key={t}
-                                    type="button"
-                                    className={`db-toggle-btn${type === t ? ' active' : ''}`}
-                                    onClick={() => setType(t)}
-                                >
-                                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="db-form-field">
-                        <label className="db-label">Currency</label>
-                        <span className="db-value-static">USD</span>
-                    </div>
-                    <div className="db-form-actions">
-                        <button className="db-btn-primary" onClick={handleSubmit} disabled={loading}>
-                            {loading ? 'Opening…' : 'Open account'}
-                        </button>
-                        <button className="db-btn-secondary" onClick={() => setShowForm(false)} disabled={loading}>
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            ) : accounts.length >= 5 ? null : (
-                <button className="db-btn-primary db-mt" onClick={() => setShowForm(true)}>
-                    + Open new account
-                </button>
-            )}
         </div>
     );
 }
