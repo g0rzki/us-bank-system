@@ -181,6 +181,7 @@ POSTGRES_DB=usbank          # nazwa bazy — zostaw bez zmian
 POSTGRES_USER=twoj_user     # dowolna nazwa użytkownika bazy
 POSTGRES_PASSWORD=twoje_haslo
 POSTGRES_PORT=5433          # port na hoście (5433 jeśli lokalny postgres zajmuje 5432)
+API_URL=http://localhost:5100  # adres API — używany przez frontend (dev i Docker)
 JWT_SECRET=min_32_znaki     # dowolny ciąg min. 32 znaków
 WEBHOOK_SECRET=dowolny_sekret  # używany przez mock gateway do wysyłania webhooków
 CORS_ORIGIN=http://localhost:3000
