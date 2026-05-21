@@ -9,15 +9,16 @@ import HistoryView from './views/HistoryView';
 import SettingsView from './views/SettingsView';
 import './DashboardPage.css';
 import { useDarkMode } from '../../utils/useDarkMode';
+import { LayoutDashboard, Wallet, ArrowLeftRight, History, Settings, LogOut } from 'lucide-react';
 
 export type View = 'overview' | 'accounts' | 'transfers' | 'history' | 'settings';
 
-const NAV_ITEMS: { id: View; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'accounts', label: 'Accounts' },
-    { id: 'transfers', label: 'Transfers' },
-    { id: 'history', label: 'History' },
-    { id: 'settings', label: 'Settings' },
+const NAV_ITEMS: { id: View; label: string; icon: React.ReactNode }[] = [
+    { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={16} /> },
+    { id: 'accounts', label: 'Accounts', icon: <Wallet size={16} /> },
+    { id: 'transfers', label: 'Transfers', icon: <ArrowLeftRight size={16} /> },
+    { id: 'history', label: 'History', icon: <History size={16} /> },
+    { id: 'settings', label: 'Settings', icon: <Settings size={16} /> },
 ];
 
 function getFirstNameFromToken(): string {
@@ -60,11 +61,15 @@ export default function DashboardPage() {
                             className={`db-nav-item${view === item.id ? ' active' : ''}`}
                             onClick={() => setView(item.id)}
                         >
+                            {item.icon}
                             <span>{item.label}</span>
                         </button>
                     ))}
                 </nav>
-                <button className="db-logout" onClick={logout}>Log out</button>
+                <button className="db-logout" onClick={logout}>
+                    <LogOut size={14} />
+                    Log out
+                </button>
             </aside>
 
             <main className="db-main">

@@ -124,6 +124,10 @@
     background: transparent;
     font-size: var(--font-size-sm);
     color: var(--color-text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
     cursor: pointer;
     text-align: center;
     width: 100%;

@@ -7,15 +7,16 @@ import { getAccounts } from '../../../api/accounts';
 import type { Account } from '../../../api/accounts';
 import TransferForm from '../components/TransferForm';
 import { useToast } from '../../../context/ToastContext';
+import { Building2, Banknote, Zap, Timer, Globe } from 'lucide-react';
 
 type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift';
 
-const CHANNEL_INFO: Record<Channel, { label: string; desc: string; settlement: string }> = {
-    internal: { label: 'Internal', desc: 'Between your accounts', settlement: 'Instant' },
-    ach: { label: 'ACH', desc: 'Standard bank transfer', settlement: 'T+1 business day' },
-    rtp: { label: 'RTP', desc: 'Real-time payment', settlement: 'Instant (24/7)' },
-    fednow: { label: 'FedNow', desc: 'Instant RTGS settlement', settlement: 'Instant' },
-    swift: { label: 'SWIFT', desc: 'International wire transfer', settlement: '1–5 business days' },
+const CHANNEL_INFO: Record<Channel, { label: string; desc: string; settlement: string; icon: React.ReactNode }> = {
+    internal: { label: 'Internal', desc: 'Between your accounts', settlement: 'Instant', icon: <Building2 size={16} /> },
+    ach: { label: 'ACH', desc: 'Standard bank transfer', settlement: 'T+1 business day', icon: <Banknote size={16} /> },
+    rtp: { label: 'RTP', desc: 'Real-time payment', settlement: 'Instant (24/7)', icon: <Zap size={16} /> },
+    fednow: { label: 'FedNow', desc: 'Instant RTGS settlement', settlement: 'Instant', icon: <Timer size={16} /> },
+    swift: { label: 'SWIFT', desc: 'International wire transfer', settlement: '1–5 business days', icon: <Globe size={16} /> },
 };
 
 const ACTIVE_STATUSES = new Set(['pending', 'pending_approval', 'processing']);
@@ -70,6 +71,7 @@ export default function TransfersView() {
                                 onClick={() => setChannel(ch)}
                                 disabled={accounts.length === 0}
                             >
+                                <span className="db-channel-tab-icon">{CHANNEL_INFO[ch].icon}</span>
                                 <span className="db-channel-tab-label">{CHANNEL_INFO[ch].label}</span>
                                 <span className="db-channel-tab-desc">{CHANNEL_INFO[ch].desc}</span>
                                 <span className="db-channel-tab-settlement">{CHANNEL_INFO[ch].settlement}</span>

@@ -2,6 +2,7 @@ import type { Account, Transaction } from '../../../api/accounts';
 import type { View } from '../DashboardPage';
 import AccountCard from '../components/AccountCard';
 import TransactionList from '../components/TransactionList';
+import { DollarSign, CreditCard, TrendingDown } from 'lucide-react';
 
 export default function OverviewView({ accounts, transactions, onNavigate, firstName }: {
     accounts: Account[];
@@ -18,15 +19,15 @@ export default function OverviewView({ accounts, transactions, onNavigate, first
 
             <div className="db-stat-row">
                 <div className="db-stat-card">
-                    <span className="db-stat-label">Total balance</span>
+                    <span className="db-stat-label"><DollarSign size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Total balance</span>
                     <span className="db-stat-value">${totalBalance.toFixed(2)}</span>
                 </div>
                 <div className="db-stat-card">
-                    <span className="db-stat-label">Accounts</span>
+                    <span className="db-stat-label"><CreditCard size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Accounts</span>
                     <span className="db-stat-value">{accounts.length}</span>
                 </div>
                 <div className="db-stat-card">
-                    <span className="db-stat-label">Recent spending</span>
+                    <span className="db-stat-label"><TrendingDown size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Recent spending</span>
                     <span className="db-stat-value">${recentSpent.toFixed(2)}</span>
                 </div>
             </div>
