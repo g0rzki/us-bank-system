@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -11,6 +11,7 @@ using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
+using UsBankSystem.Api.Services.Payments;
 using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Core.Entities;
 using UsBankSystem.Infrastructure.Persistence;
@@ -63,8 +64,13 @@ public class ApproveRejectTransferTests
                 { BaseAddress = new Uri("http://localhost:6004") },
             NullLogger<SwiftGateway>.Instance);
 
-        var service = new TransferService(db, achGateway, rtpGateway, fedNowGateway, swiftGateway, CreatePaymentConfig());
-        var controller = new TransfersController(service, CreateConfig());
+        var internalPayment = new InternalPaymentService(db);
+        var achPayment = new AchPaymentService(db, achGateway, CreatePaymentConfig());
+        var rtpPayment = new RtpPaymentService(db, rtpGateway, CreatePaymentConfig());
+        var fedNowPayment = new FedNowPaymentService(db, fedNowGateway, CreatePaymentConfig());
+        var swiftPayment = new SwiftPaymentService(db, swiftGateway, CreatePaymentConfig());
+        var transferService = new TransferService(db);
+        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -237,3 +243,5 @@ public class ApproveRejectTransferTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => controller.Reject(transferId));
     }
 }
+
+
