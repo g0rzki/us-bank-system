@@ -4,8 +4,9 @@ using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Core.Domain.Accounts;
 using UsBankSystem.Core.Domain.Cards;
 using UsBankSystem.Core.Domain.Common;
-using Account = UsBankSystem.Core.Entities.Account;
 using UsBankSystem.Core.Entities;
+using Account = UsBankSystem.Core.Entities.Account;
+using Card = UsBankSystem.Core.Entities.Card;
 using UsBankSystem.Infrastructure.Persistence;
 
 namespace UsBankSystem.Api.Services;
