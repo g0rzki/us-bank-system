@@ -268,36 +268,28 @@ public class AccountService(AppDbContext db)
         };
     }
 
-	public async Task<CardResponse> AddJuniorCardAsync(Guid userId, Guid juniorAccountId, AddJuniorCardRequest request)
+	public async Task<CardResponse> UpdateJuniorLimitAsync(Guid userId, Guid juniorAccountId, UpdateJuniorLimitRequest request)
 	{
+    	if (request.DailyLimit is null && request.MonthlyLimit is null)
+        	throw new ArgumentException("At least one limit (DailyLimit or MonthlyLimit) must be provided");
+
     	var juniorLink = await db.JuniorAccounts
-        	.Include(j => j.Account)
         	.FirstOrDefaultAsync(j => j.AccountId == juniorAccountId)
         	?? throw new KeyNotFoundException("Junior account not found");
 
     	if (juniorLink.ParentUserId != userId)
         	throw new UnauthorizedAccessException("Access denied");
 
-    	var existingCard = await db.Cards
-        	.AnyAsync(c => c.AccountId == juniorAccountId && c.Type == CardType.Prepaid && c.Status == CardStatus.Active);
-    	if (existingCard)
-        	throw new InvalidOperationException("Junior account already has an active prepaid card");
+    	var card = await db.Cards
+        	.FirstOrDefaultAsync(c => c.AccountId == juniorAccountId && c.Type == CardType.Prepaid && c.Status == CardStatus.Active)
+        	?? throw new KeyNotFoundException("No active prepaid card found for this junior account");
 
-    	var card = new Card
-    	{
-        	Id = Guid.NewGuid(),
-        	AccountId = juniorAccountId,
-        	Last4 = request.Last4,
-        	Type = CardType.Prepaid,
-        	Status = CardStatus.Active,
-        	ExternalCardToken = request.ExternalCardToken,
-        	DailyLimit = request.DailyLimit,
-			MonthlyLimit = request.MonthlyLimit,
-        	ExpiresAt = request.ExpiresAt,
-        	CreatedAt = DateTime.UtcNow
-    	};
+    	if (request.DailyLimit.HasValue)
+        	card.DailyLimit = request.DailyLimit.Value;
 
-    	db.Cards.Add(card);
+    	if (request.MonthlyLimit.HasValue)
+        	card.MonthlyLimit = request.MonthlyLimit.Value;
+
     	await db.SaveChangesAsync();
 
     	return new CardResponse
