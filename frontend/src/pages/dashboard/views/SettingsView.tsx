@@ -15,7 +15,7 @@ export default function SettingsView({ dark, onToggleTheme }: Props) {
                     </button>
                 ))}
                 <button className="db-settings-item" onClick={onToggleTheme}>
-                    <span>{dark ? 'Dark mode' : 'Light mode'}</span>
+                    <span>Dark mode</span>
                     <span className={`db-theme-track${dark ? ' on' : ''}`}>
                         <span className="db-theme-thumb" />
                     </span>
