@@ -4,8 +4,9 @@ using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Core.Domain.Accounts;
 using UsBankSystem.Core.Domain.Cards;
 using UsBankSystem.Core.Domain.Common;
-using Account = UsBankSystem.Core.Entities.Account;
 using UsBankSystem.Core.Entities;
+using Account = UsBankSystem.Core.Entities.Account;
+using Card = UsBankSystem.Core.Entities.Card;
 using UsBankSystem.Infrastructure.Persistence;
 
 namespace UsBankSystem.Api.Services;
@@ -266,6 +267,52 @@ public class AccountService(AppDbContext db)
             CreatedAt = juniorLink.CreatedAt
         };
     }
+
+	public async Task<CardResponse> AddJuniorCardAsync(Guid userId, Guid juniorAccountId, AddJuniorCardRequest request)
+	{
+    	var juniorLink = await db.JuniorAccounts
+        	.Include(j => j.Account)
+        	.FirstOrDefaultAsync(j => j.AccountId == juniorAccountId)
+        	?? throw new KeyNotFoundException("Junior account not found");
+
+    	if (juniorLink.ParentUserId != userId)
+        	throw new UnauthorizedAccessException("Access denied");
+
+    	var existingCard = await db.Cards
+        	.AnyAsync(c => c.AccountId == juniorAccountId && c.Type == CardType.Prepaid && c.Status == CardStatus.Active);
+    	if (existingCard)
+        	throw new InvalidOperationException("Junior account already has an active prepaid card");
+
+    	var card = new Card
+    	{
+        	Id = Guid.NewGuid(),
+        	AccountId = juniorAccountId,
+        	Last4 = request.Last4,
+        	Type = CardType.Prepaid,
+        	Status = CardStatus.Active,
+        	ExternalCardToken = request.ExternalCardToken,
+        	DailyLimit = request.DailyLimit,
+			MonthlyLimit = request.MonthlyLimit,
+        	ExpiresAt = request.ExpiresAt,
+        	CreatedAt = DateTime.UtcNow
+    	};
+
+    	db.Cards.Add(card);
+    	await db.SaveChangesAsync();
+
+    	return new CardResponse
+    	{
+        	Id = card.Id,
+        	AccountId = card.AccountId,
+        	Last4 = card.Last4,
+        	Type = card.Type,
+        	Status = card.Status,
+        	DailyLimit = card.DailyLimit,
+        	MonthlyLimit = card.MonthlyLimit,
+        	ExpiresAt = card.ExpiresAt,
+        	CreatedAt = card.CreatedAt
+    	};
+	}
 
     private static async Task<string> GenerateAccountNumberAsync(AppDbContext db)
     {

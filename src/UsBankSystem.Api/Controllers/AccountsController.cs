@@ -88,5 +88,18 @@ public class AccountsController(AccountService accountService) : ControllerBase
         var result = await accountService.CreateJuniorAsync(userId, request);
         return StatusCode(StatusCodes.Status201Created, result);
     }
-
+    
+    [HttpPost("junior/{id:guid}/card")]
+    [ProducesResponseType(typeof(CardResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> AddJuniorCard(Guid id, [FromBody] AddJuniorCardRequest request)
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+        var result = await accountService.AddJuniorCardAsync(userId, id, request);
+        return StatusCode(StatusCodes.Status201Created, result);
+    }
 }
