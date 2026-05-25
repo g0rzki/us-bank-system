@@ -3,15 +3,14 @@ import { createAccount, createJuniorAccount, getJuniorAccounts } from '../../../
 import type { Account, JuniorAccount } from '../../../api/accounts';
 import AccountCard from '../components/AccountCard';
 import JuniorAccountList from '../components/JuniorAccountList';
+import { useToast } from '../../../context/ToastContext';
 
 export default function AccountsView({ accounts, onAccountCreated }: {
     accounts: Account[];
     onAccountCreated: (account: Account) => void;
 }) {
-    const [showForm, setShowForm] = useState(false);
-    const [type, setType] = useState<'checking' | 'savings'>('checking');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const { showToast } = useToast();
+    const [loadingType, setLoadingType] = useState<'checking' | 'savings' | null>(null);
     const [juniorAccounts, setJuniorAccounts] = useState<JuniorAccount[]>([]);
     const [juniorLoading, setJuniorLoading] = useState(false);
     const [showJuniorForm, setShowJuniorForm] = useState(false);
@@ -21,7 +20,6 @@ export default function AccountsView({ accounts, onAccountCreated }: {
     const [juniorFirstName, setJuniorFirstName] = useState('');
     const [juniorLastName, setJuniorLastName] = useState('');
     const [juniorDob, setJuniorDob] = useState('');
-    const [juniorError, setJuniorError] = useState<string | null>(null);
     const [juniorLoading2, setJuniorLoading2] = useState(false);
 
     useEffect(() => {
@@ -34,9 +32,8 @@ export default function AccountsView({ accounts, onAccountCreated }: {
     }, [accounts]);
 
     const handleCreateJunior = async () => {
-        setJuniorError(null);
         if (!juniorParentAccountId || !juniorEmail || !juniorPassword || !juniorFirstName || !juniorLastName || !juniorDob) {
-            setJuniorError('All fields are required');
+            showToast('All fields are required');
             return;
         }
         setJuniorLoading2(true);
@@ -46,29 +43,50 @@ export default function AccountsView({ accounts, onAccountCreated }: {
             setShowJuniorForm(false);
             setJuniorEmail(''); setJuniorPassword(''); setJuniorFirstName(''); setJuniorLastName(''); setJuniorDob('');
         } catch (e: any) {
-            setJuniorError(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to create junior account.');
+            showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to create junior account.');
         } finally {
             setJuniorLoading2(false);
         }
     };
 
-    const handleSubmit = async () => {
-        setLoading(true);
-        setError(null);
+    const handleCreate = async (type: 'checking' | 'savings') => {
+        setLoadingType(type);
         try {
             const account = await createAccount(type);
             onAccountCreated(account);
-            setShowForm(false);
         } catch (e: any) {
-            setError(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to create account. Please try again.');
+            showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to create account. Please try again.');
         } finally {
-            setLoading(false);
+            setLoadingType(null);
         }
     };
 
+    const canCreateMore = true;
+
     return (
         <div className="db-view">
-            <h1 className="db-view-title">Accounts</h1>
+            <div className="db-section-header db-mb">
+                <h1 className="db-view-title" style={{ margin: 0 }}>Accounts</h1>
+                {canCreateMore && (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                            className="db-btn-secondary"
+                            onClick={() => handleCreate('checking')}
+                            disabled={loadingType !== null}
+                        >
+                            {loadingType === 'checking' ? 'Opening…' : '+ Checking account'}
+                        </button>
+                        <button
+                            className="db-btn-secondary"
+                            onClick={() => handleCreate('savings')}
+                            disabled={loadingType !== null}
+                        >
+                            {loadingType === 'savings' ? 'Opening…' : '+ Savings account'}
+                        </button>
+                    </div>
+                )}
+            </div>
+
             {accounts.length === 0 ? (
                 <p className="db-empty">No accounts yet.</p>
             ) : (
@@ -81,7 +99,7 @@ export default function AccountsView({ accounts, onAccountCreated }: {
                 <div className="db-section-header">
                     <h2>Junior accounts</h2>
                     {!showJuniorForm && (
-                        <button className="db-btn-secondary" style={{ fontSize: '0.875rem' }} onClick={() => { setShowJuniorForm(true); setJuniorError(null); }}>
+                        <button className="db-btn-secondary" style={{ fontSize: '0.875rem' }} onClick={() => setShowJuniorForm(true)}>
                             + Add junior account
                         </button>
                     )}
@@ -118,7 +136,6 @@ export default function AccountsView({ accounts, onAccountCreated }: {
                                 <span className="db-label">Date of birth (age 7–13)</span>
                                 <input className="db-input" type="date" value={juniorDob} onChange={e => setJuniorDob(e.target.value)} />
                             </div>
-                            {juniorError && <p className="db-error">{juniorError}</p>}
                             <div className="db-form-actions">
                                 <button className="db-btn-primary" onClick={handleCreateJunior} disabled={juniorLoading2}>
                                     {juniorLoading2 ? 'Creating…' : 'Create account'}
@@ -135,44 +152,6 @@ export default function AccountsView({ accounts, onAccountCreated }: {
                     <JuniorAccountList accounts={juniorAccounts} />
                 )}
             </div>
-
-            {showForm ? (
-                <div className="db-form-card db-mt">
-                    <h2 className="db-section-title">Open new account</h2>
-                    <div className="db-form-field">
-                        <label className="db-label">Account type</label>
-                        <div className="db-toggle-group">
-                            {(['checking', 'savings'] as const).map(t => (
-                                <button
-                                    key={t}
-                                    type="button"
-                                    className={`db-toggle-btn${type === t ? ' active' : ''}`}
-                                    onClick={() => setType(t)}
-                                >
-                                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="db-form-field">
-                        <label className="db-label">Currency</label>
-                        <span className="db-value-static">USD</span>
-                    </div>
-                    {error && <p className="db-error">{error}</p>}
-                    <div className="db-form-actions">
-                        <button className="db-btn-primary" onClick={handleSubmit} disabled={loading}>
-                            {loading ? 'Opening…' : 'Open account'}
-                        </button>
-                        <button className="db-btn-secondary" onClick={() => setShowForm(false)} disabled={loading}>
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            ) : accounts.length >= 5 ? null : (
-                <button className="db-btn-primary db-mt" onClick={() => setShowForm(true)}>
-                    + Open new account
-                </button>
-            )}
         </div>
     );
 }

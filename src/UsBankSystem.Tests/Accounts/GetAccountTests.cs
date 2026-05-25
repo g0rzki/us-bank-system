@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -31,7 +31,7 @@ public class GetAccountTests
 
     private AccountsController CreateController(AppDbContext db, Guid userId)
     {
-        var controller = new AccountsController(new AccountService(db));
+        var controller = new AccountsController(new AccountService(db), new TransactionService(db), new JuniorService(db));
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -102,3 +102,4 @@ public class GetAccountTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => controller.GetById(accountId));
     }
 }
+

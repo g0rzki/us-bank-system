@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -12,6 +12,7 @@ using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Services;
+using UsBankSystem.Api.Services.Payments;
 using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Infrastructure.Persistence;
 using UsBankSystem.Tests.Helpers;
@@ -63,8 +64,13 @@ public class CreateFedNowTransferTests
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode fedNowStatus = HttpStatusCode.OK)
     {
-        var service = new TransferService(db, CreateAchGateway(), CreateRtpGateway(), CreateFedNowGateway(fedNowStatus), CreateSwiftGateway(), CreatePaymentConfig());
-        var controller = new TransfersController(service, CreateConfig());
+        var internalPayment = new InternalPaymentService(db);
+        var achPayment = new AchPaymentService(db, CreateAchGateway(), CreatePaymentConfig());
+        var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(), CreatePaymentConfig());
+        var fedNowPayment = new FedNowPaymentService(db, CreateFedNowGateway(fedNowStatus), CreatePaymentConfig());
+        var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(), CreatePaymentConfig());
+        var transferService = new TransferService(db);
+        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -91,7 +97,7 @@ public class CreateFedNowTransferTests
         });
         var user = await db.Users.FirstAsync();
         var accountService = new AccountService(db);
-        var accountController = new AccountsController(accountService);
+        var accountController = new AccountsController(accountService, new TransactionService(db), new JuniorService(db));
         accountController.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -200,3 +206,4 @@ public class CreateFedNowTransferTests
         Assert.Equal(0m, account!.ReservedBalance);
     }
 }
+

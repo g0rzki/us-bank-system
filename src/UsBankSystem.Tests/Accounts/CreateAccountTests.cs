@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Models.Requests;
@@ -38,7 +38,7 @@ public class CreateAccountTests
         });
         var user = await db.Users.FirstAsync();
 
-        var controller = new AccountsController(new AccountService(db));
+        var controller = new AccountsController(new AccountService(db), new TransactionService(db), new JuniorService(db));
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -119,3 +119,4 @@ public class CreateAccountTests
             controller.Create(new CreateAccountRequest { Type = "checking", Currency = "EUR" }));
     }
 }
+

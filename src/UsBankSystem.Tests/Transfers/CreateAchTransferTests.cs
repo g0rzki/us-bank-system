@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +13,7 @@ using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
+using UsBankSystem.Api.Services.Payments;
 using UsBankSystem.Infrastructure.Persistence;
 using UsBankSystem.Tests.Helpers;
 
@@ -63,8 +64,13 @@ public class CreateAchTransferTests
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6004") },
             NullLogger<SwiftGateway>.Instance);
-        var service = new TransferService(db, gateway, rtpGateway, fedNowGateway, swiftGateway, CreatePaymentConfig());
-        var controller = new TransfersController(service, CreateConfig());
+        var internalPayment = new InternalPaymentService(db);
+        var achPayment = new AchPaymentService(db, gateway, CreatePaymentConfig());
+        var rtpPayment = new RtpPaymentService(db, rtpGateway, CreatePaymentConfig());
+        var fedNowPayment = new FedNowPaymentService(db, fedNowGateway, CreatePaymentConfig());
+        var swiftPayment = new SwiftPaymentService(db, swiftGateway, CreatePaymentConfig());
+        var transferService = new TransferService(db);
+        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -91,7 +97,7 @@ public class CreateAchTransferTests
         });
         var user = await db.Users.FirstAsync();
         var accountService = new AccountService(db);
-        var accountController = new AccountsController(accountService);
+        var accountController = new AccountsController(accountService, new TransactionService(db), new JuniorService(db));
         accountController.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -188,3 +194,5 @@ public class CreateAchTransferTests
         Assert.Equal("ACH-REF-001", transfer.ExternalReferenceId);
     }
 }
+
+

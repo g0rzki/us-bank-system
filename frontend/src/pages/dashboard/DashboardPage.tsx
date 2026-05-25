@@ -9,16 +9,28 @@ import HistoryView from './views/HistoryView';
 import SettingsView from './views/SettingsView';
 import './DashboardPage.css';
 import { useDarkMode } from '../../utils/useDarkMode';
+import { LayoutDashboard, Wallet, ArrowLeftRight, History, Settings, LogOut } from 'lucide-react';
 
 export type View = 'overview' | 'accounts' | 'transfers' | 'history' | 'settings';
 
-const NAV_ITEMS: { id: View; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'accounts', label: 'Accounts' },
-    { id: 'transfers', label: 'Transfers' },
-    { id: 'history', label: 'History' },
-    { id: 'settings', label: 'Settings' },
+const NAV_ITEMS: { id: View; label: string; icon: React.ReactNode }[] = [
+    { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={16} /> },
+    { id: 'accounts', label: 'Accounts', icon: <Wallet size={16} /> },
+    { id: 'transfers', label: 'Transfers', icon: <ArrowLeftRight size={16} /> },
+    { id: 'history', label: 'History', icon: <History size={16} /> },
+    { id: 'settings', label: 'Settings', icon: <Settings size={16} /> },
 ];
+
+function getFirstNameFromToken(): string {
+    const token = localStorage.getItem('token');
+    if (!token) return '';
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return payload['given_name'] ?? payload['firstName'] ?? '';
+    } catch {
+        return '';
+    }
+}
 
 export default function DashboardPage() {
     const [view, setView] = useState<View>('overview');
@@ -26,12 +38,13 @@ export default function DashboardPage() {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loading, setLoading] = useState(true);
     const { dark, toggle } = useDarkMode();
+    const firstName = getFirstNameFromToken();
 
     useEffect(() => {
         getAccounts().then(async data => {
             setAccounts(data);
             if (data.length > 0) {
-                const tx = await getTransactions(data[0].id, 1, 5);
+                const tx = await getTransactions(data[0].id, 1, 10);
                 setTransactions(tx.items);
             }
         }).finally(() => setLoading(false));
@@ -48,17 +61,15 @@ export default function DashboardPage() {
                             className={`db-nav-item${view === item.id ? ' active' : ''}`}
                             onClick={() => setView(item.id)}
                         >
+                            {item.icon}
                             <span>{item.label}</span>
                         </button>
                     ))}
                 </nav>
-                <button className="db-theme-toggle" onClick={toggle}>
-                    <span>{dark ? 'Light mode' : 'Dark mode'}</span>
-                    <span className={`db-theme-track${dark ? ' on' : ''}`}>
-                        <span className="db-theme-thumb" />
-                    </span>
+                <button className="db-logout" onClick={logout}>
+                    <LogOut size={14} />
+                    Log out
                 </button>
-                <button className="db-logout" onClick={logout}>Log out</button>
             </aside>
 
             <main className="db-main">
@@ -66,11 +77,11 @@ export default function DashboardPage() {
                     <div className="db-loading">Loading...</div>
                 ) : (
                     <>
-                        {view === 'overview' && <OverviewView accounts={accounts} transactions={transactions} onNavigate={setView} />}
+                        {view === 'overview' && <OverviewView accounts={accounts} transactions={transactions} onNavigate={setView} firstName={firstName} />}
                         {view === 'accounts' && <AccountsView accounts={accounts} onAccountCreated={acc => setAccounts(prev => [...prev, acc])} />}
                         {view === 'transfers' && <TransfersView />}
                         {view === 'history' && <HistoryView accounts={accounts} />}
-                        {view === 'settings' && <SettingsView />}
+                        {view === 'settings' && <SettingsView dark={dark} onToggleTheme={toggle} />}
                     </>
                 )}
             </main>

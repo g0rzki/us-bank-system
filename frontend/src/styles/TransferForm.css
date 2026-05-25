@@ -1,96 +1,90 @@
-.tf-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.4);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-}
-
-.tf-modal {
+.db-surface {
     background: var(--color-surface);
     border-radius: var(--radius-card);
-    box-shadow: var(--shadow-card);
-    width: 100%;
-    max-width: 520px;
-    max-height: 90vh;
-    overflow-y: auto;
-    padding: var(--spacing-xl);
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+}
+
+.db-channel-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.db-channel-tab {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-md);
-}
-
-.tf-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.tf-title {
-    font-size: var(--font-size-xl);
-    font-weight: 700;
-    color: var(--color-text);
-    margin: 0;
-}
-
-.tf-close {
-    background: none;
+    gap: 2px;
+    padding: var(--spacing-md);
     border: none;
-    font-size: 1.2rem;
-    color: var(--color-text-muted);
-    cursor: pointer;
-    padding: var(--spacing-xs);
-}
-
-.tf-channels {
-    display: flex;
-    gap: var(--spacing-sm);
-    flex-wrap: wrap;
-}
-
-.tf-channel-btn {
-    padding: 6px 14px;
-    border-radius: 20px;
-    border: 1.5px solid var(--color-border);
+    border-right: 1px solid var(--color-border);
     background: none;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-sm);
     cursor: pointer;
-    transition: all 0.15s;
+    text-align: left;
+    transition: background 0.15s;
 }
 
-.tf-channel-btn.active {
-    border-color: var(--color-primary);
+.db-channel-tab:last-child {
+    border-right: none;
+}
+
+.db-channel-tab:hover {
+    background: var(--color-bg);
+}
+
+.db-channel-tab.active {
     background: var(--color-primary);
+}
+
+.db-channel-tab.active .db-channel-tab-label,
+.db-channel-tab.active .db-channel-tab-desc,
+.db-channel-tab.active .db-channel-tab-settlement {
     color: var(--color-primary-text);
 }
 
-.tf-settlement {
+.db-channel-tab-icon {
     display: flex;
-    gap: var(--spacing-sm);
-    align-items: center;
-    font-size: var(--font-size-sm);
     color: var(--color-text-muted);
-    background: var(--color-bg);
-    padding: var(--spacing-sm) var(--spacing-md);
-    border-radius: var(--radius-input);
+    margin-bottom: 2px;
 }
 
-.tf-settlement-label {
-    font-weight: 600;
+.db-channel-tab.active .db-channel-tab-icon {
+    color: var(--color-primary-text);
 }
 
-.tf-settlement-value {
+.db-channel-tab-label {
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.db-channel-tab-desc {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.db-channel-tab-settlement {
+    font-size: 0.75rem;
     color: var(--color-primary);
     font-weight: 600;
+}
+
+.db-channel-form {
+    padding: var(--spacing-lg) var(--spacing-xl);
+    display: flex;
+    justify-content: center;
 }
 
 .tf-fields {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-md);
+    width: 100%;
+    max-width: 480px;
+}
+
+.tf-row {
+    display: contents;
 }
 
 .tf-field {
@@ -128,34 +122,14 @@
     border-color: var(--color-primary);
 }
 
-.tf-error {
-    color: var(--color-error);
-    font-size: var(--font-size-sm);
-    background: var(--color-error-bg);
-    border: 1px solid var(--color-error-border);
-    border-radius: var(--radius-input);
-    padding: var(--spacing-sm) var(--spacing-md);
-    margin: 0;
-}
-
-.tf-actions {
+.tf-submit-row {
     display: flex;
-    gap: var(--spacing-md);
-    justify-content: flex-end;
-}
-
-.tf-btn-cancel {
-    padding: 0 var(--spacing-xl);
-    height: var(--btn-height);
-    border-radius: var(--radius-btn);
-    border: 1.5px solid var(--color-border);
-    background: none;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-base);
-    cursor: pointer;
+    justify-content: center;
+    padding-top: var(--spacing-xs);
 }
 
 .tf-btn-submit {
+    width: 60%;
     padding: 0 var(--spacing-xl);
     height: var(--btn-height);
     border-radius: var(--radius-btn);
@@ -172,8 +146,7 @@
     background: var(--color-primary-hover);
 }
 
-.tf-btn-submit:disabled,
-.tf-btn-cancel:disabled {
+.tf-btn-submit:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }

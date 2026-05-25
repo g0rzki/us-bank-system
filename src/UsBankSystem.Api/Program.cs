@@ -15,7 +15,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddScoped<UsBankSystem.Api.Services.AuthService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.AccountService>();
+builder.Services.AddScoped<UsBankSystem.Api.Services.TransactionService>();
+builder.Services.AddScoped<UsBankSystem.Api.Services.JuniorService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.TransferService>();
+builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.InternalPaymentService>();
+builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.AchPaymentService>();
+builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.RtpPaymentService>();
+builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.FedNowPaymentService>();
+builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.SwiftPaymentService>();
 // CORS
 builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
     p.WithOrigins(builder.Configuration["Cors:Origin"] ?? "http://localhost:5173")
@@ -70,16 +77,18 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+using (var scope = app.Services.CreateScope())
 {
-    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     if (db.Database.IsRelational())
     {
         await db.Database.MigrateAsync();
         await DbSeeder.SeedAsync(db);
     }
+}
 
+if (app.Environment.IsDevelopment())
+{
     app.UseSwagger();
     app.UseSwaggerUI();
 }

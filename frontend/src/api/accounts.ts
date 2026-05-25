@@ -17,6 +17,8 @@ export interface Transaction {
     status: string;
     description: string | null;
     referenceId: string | null;
+    channel: string | null;
+    counterpartyAccountNumber: string | null;
     createdAt: string;
 }
 

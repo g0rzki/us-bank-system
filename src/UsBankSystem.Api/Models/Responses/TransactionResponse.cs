@@ -8,5 +8,7 @@ public class TransactionResponse
     public string Status { get; set; } = null!;
     public string? Description { get; set; }
     public string? ReferenceId { get; set; }
+    public string? Channel { get; set; }
+    public string? CounterpartyAccountNumber { get; set; }
     public DateTime CreatedAt { get; set; }
 }
