@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getTransactions } from '../../../api/accounts';
 import type { Account, Transaction } from '../../../api/accounts';
+import AccountTabs from '../components/AccountTabs';
 import TransactionDetails from '../components/TransactionDetails';
 
 function groupByDate(items: Transaction[]): [string, Transaction[]][] {
@@ -45,17 +46,11 @@ export default function HistoryView({ accounts }: { accounts: Account[] }) {
         <div className="db-view">
             <h1 className="db-view-title">History</h1>
 
-            <div className="db-account-tabs">
-                {accounts.map(acc => (
-                    <button
-                        key={acc.id}
-                        className={`db-account-tab${selectedAccount?.id === acc.id ? ' active' : ''}`}
-                        onClick={() => setSelectedAccount(acc)}
-                    >
-                        {acc.type} ••••{acc.accountNumber.slice(-4)}
-                    </button>
-                ))}
-            </div>
+            <AccountTabs
+                accounts={accounts}
+                selectedId={selectedAccount?.id ?? ''}
+                onSelect={id => setSelectedAccount(accounts.find(a => a.id === id) ?? null)}
+            />
 
             {loading ? (
                 <div className="db-loading">Loading...</div>

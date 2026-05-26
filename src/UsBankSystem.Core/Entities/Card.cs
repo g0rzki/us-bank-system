@@ -9,6 +9,7 @@ public class Card
     public string Status { get; set; } = "active";    // active | blocked | expired
     public string? ExternalCardToken { get; set; }    // token z modułu kart
     public DateTime ExpiresAt { get; set; }
+    public DateTime? BlockedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Limity — używane dla kart prepaid konta junior

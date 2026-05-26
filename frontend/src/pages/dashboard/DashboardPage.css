@@ -827,3 +827,90 @@
     flex-direction: column;
     gap: var(--spacing-md);
 }
+
+/* Danger button */
+.db-btn-danger {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-pill);
+    border: none;
+    background: #dc2626;
+    color: #fff;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.db-btn-danger:hover {
+    background: #b91c1c;
+}
+
+.db-btn-danger:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Card status colors — list badge + detail */
+.db-card-status-badge {
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.db-card-status-active { color: var(--color-success, #16a34a); }
+.db-card-status-blocked { color: #d97706; }
+.db-card-status-expired { color: #dc2626; }
+
+.db-card-detail-rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+/* Cards list */
+.db-card-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.db-card-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-sm) 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.db-card-item:last-child {
+    border-bottom: none;
+}
+
+.db-card-item-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-pill);
+    background: var(--color-bg);
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+
+.db-card-item-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: 2px;
+}
+
+.db-card-item-name {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-text);
+}
+
+.db-card-item-meta {
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+}
