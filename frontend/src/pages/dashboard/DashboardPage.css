@@ -433,6 +433,17 @@
     background: transparent;
 }
 
+.db-account-tab.junior {
+    border-color: #16a34a;
+    color: #16a34a;
+}
+
+.db-account-tab.junior.active {
+    background: #16a34a;
+    color: #fff;
+    border-color: #16a34a;
+}
+
 /* Transaction list */
 .db-tx-list {
     list-style: none;
@@ -848,6 +859,96 @@
 .db-btn-danger:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+}
+
+/* Kid card */
+.db-kid-card {
+    background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+    border-radius: var(--radius-card);
+    padding: var(--spacing-lg);
+    color: #fff;
+    max-width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.db-kid-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.db-kid-card-bank {
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+}
+
+.db-kid-card-number {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+}
+
+.db-kid-card-bottom {
+    display: flex;
+    gap: var(--spacing-lg);
+}
+
+.db-kid-card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.db-kid-card-field-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.7;
+}
+
+.db-kid-card-field-value {
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.db-kid-card-limits {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: var(--radius-md, 8px);
+    padding: var(--spacing-sm) var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.db-kid-card-limits .db-account-popup-label {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.db-kid-card-limits .db-account-popup-value {
+    color: #fff;
+    font-weight: 500;
+}
+
+.db-kid-card .db-card-status-badge {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+}
+
+.db-kid-card .db-card-status-active { color: #fff; }
+.db-kid-card .db-card-status-blocked { color: #fde68a; }
+.db-kid-card .db-card-status-expired { color: #fca5a5; }
+
+.db-junior-card-section {
+    border-top: 1px solid var(--color-border);
+    padding-top: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
 }
 
 /* Card status colors — list badge + detail */

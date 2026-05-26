@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { getTransactions } from '../../../api/accounts';
+import { getTransactions, getJuniorAccounts } from '../../../api/accounts';
 import type { Account, Transaction } from '../../../api/accounts';
-import AccountTabs from '../components/AccountTabs';
+import AccountTabs, { buildTabs } from '../components/AccountTabs';
+import type { TabEntry } from '../components/AccountTabs';
 import TransactionDetails from '../components/TransactionDetails';
 
 function groupByDate(items: Transaction[]): [string, Transaction[]][] {
@@ -24,21 +25,31 @@ function statusLabel(status: string): string {
     }
 }
 
-
 export default function HistoryView({ accounts }: { accounts: Account[] }) {
-    const [selectedAccount, setSelectedAccount] = useState<Account | null>(accounts[0] ?? null);
+    const [tabs, setTabs] = useState<TabEntry[]>([]);
+    const [selectedId, setSelectedId] = useState(accounts[0]?.id ?? '');
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loading, setLoading] = useState(false);
     const [expandedId, setExpandedId] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!selectedAccount) return;
+        if (accounts.length === 0) return;
+        Promise.all(accounts.map(a => getJuniorAccounts(a.id)))
+            .then(results => {
+                const seen = new Set<string>();
+                const unique = results.flat().filter(j => seen.has(j.juniorAccountId) ? false : seen.add(j.juniorAccountId) && true);
+                setTabs(buildTabs(accounts, unique));
+            });
+    }, [accounts]);
+
+    useEffect(() => {
+        if (!selectedId) return;
         setLoading(true);
         setExpandedId(null);
-        getTransactions(selectedAccount.id, 1, 50)
+        getTransactions(selectedId, 1, 50)
             .then(d => setTransactions(d.items))
             .finally(() => setLoading(false));
-    }, [selectedAccount]);
+    }, [selectedId]);
 
     const groups = groupByDate(transactions);
 
@@ -46,11 +57,7 @@ export default function HistoryView({ accounts }: { accounts: Account[] }) {
         <div className="db-view">
             <h1 className="db-view-title">History</h1>
 
-            <AccountTabs
-                accounts={accounts}
-                selectedId={selectedAccount?.id ?? ''}
-                onSelect={id => setSelectedAccount(accounts.find(a => a.id === id) ?? null)}
-            />
+            <AccountTabs tabs={tabs} selectedId={selectedId} onSelect={setSelectedId} />
 
             {loading ? (
                 <div className="db-loading">Loading...</div>

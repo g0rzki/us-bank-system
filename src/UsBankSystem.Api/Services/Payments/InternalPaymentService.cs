@@ -17,8 +17,7 @@ public class InternalPaymentService(AppDbContext db) : PaymentServiceBase(db)
         if (!CurrencyCode.IsValid(request.Currency))
             throw new ArgumentException($"Unsupported currency '{request.Currency}'");
 
-        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
-            ?? throw new KeyNotFoundException("Source account not found or inactive");
+        var fromAccount = await ResolveFromAccountAsync(userId, request.FromAccountId);
 
         var toAccount = request.ToAccountId.HasValue
             ? await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId.Value && a.Status == AccountStatus.Active)
@@ -38,7 +37,7 @@ public class InternalPaymentService(AppDbContext db) : PaymentServiceBase(db)
         if (dailyLimit.HasValue && todayTotal + request.Amount > dailyLimit.Value)
             throw new ArgumentException($"Daily transfer limit exceeded. Limit: {dailyLimit}, used: {todayTotal}, requested: {request.Amount}");
 
-        if (await IsJuniorAccountAsync(fromAccount.Id))
+        if (await IsJuniorInitiatedAsync(userId, fromAccount.Id))
             return await CreatePendingApprovalAsync(fromAccount, toAccount.Id, request.Amount, request.Currency, TransferChannel.Internal, request.Description);
 
         var transfer = new Transfer

@@ -27,9 +27,22 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         if (!CardType.IsValid(request.Type))
             throw new ArgumentException($"Invalid card type '{request.Type}'. Allowed: {CardType.Debit}, {CardType.Prepaid}");
 
+        ValidateLimits(request.DailyLimit, request.MonthlyLimit);
         await VerifyAccountOwnershipAsync(userId, accountId);
 
-        await EnsureNoDuplicateActiveCardAsync(accountId, request.Type);
+        var isJuniorAccount = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId);
+        if (isJuniorAccount)
+        {
+            if (request.Type != CardType.Prepaid)
+                throw new InvalidOperationException("Junior accounts can only have prepaid cards");
+            var alreadyHasCard = await db.Cards.AnyAsync(c => c.AccountId == accountId && c.Status != CardStatus.Expired);
+            if (alreadyHasCard)
+                throw new InvalidOperationException("Junior account already has a card");
+        }
+        else
+        {
+            await EnsureNoDuplicateActiveCardAsync(accountId, request.Type);
+        }
 
         var last4 = Random.Shared.Next(0, 10000).ToString("D4");
         var expiresAt = DateTime.UtcNow.AddYears(5);
@@ -80,12 +93,53 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         return MapToResponse(card);
     }
 
+    public async Task<CardResponse> UpdateCardLimitsAsync(Guid userId, Guid accountId, Guid cardId, UpdateCardLimitsRequest request)
+    {
+        if (request.DailyLimit is null && request.MonthlyLimit is null)
+            throw new ArgumentException("At least one limit must be provided");
+
+        var isJuniorAccount = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId);
+        if (isJuniorAccount)
+        {
+            var isParent = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId && j.ParentUserId == userId);
+            if (!isParent)
+                throw new UnauthorizedAccessException("Only a parent can edit junior card limits");
+        }
+        else
+        {
+            await VerifyAccountOwnershipAsync(userId, accountId);
+        }
+
+        var card = await db.Cards.FirstOrDefaultAsync(c => c.Id == cardId && c.AccountId == accountId)
+            ?? throw new KeyNotFoundException("Card not found");
+
+        var effectiveDaily = request.DailyLimit ?? card.DailyLimit;
+        var effectiveMonthly = request.MonthlyLimit ?? card.MonthlyLimit;
+        ValidateLimits(effectiveDaily, effectiveMonthly);
+
+        if (request.DailyLimit.HasValue) card.DailyLimit = request.DailyLimit.Value;
+        if (request.MonthlyLimit.HasValue) card.MonthlyLimit = request.MonthlyLimit.Value;
+        await db.SaveChangesAsync();
+
+        return MapToResponse(card);
+    }
+
+    private static void ValidateLimits(decimal? dailyLimit, decimal? monthlyLimit)
+    {
+        if (dailyLimit.HasValue && monthlyLimit.HasValue && monthlyLimit.Value < dailyLimit.Value)
+            throw new ArgumentException("Monthly limit cannot be less than daily limit");
+    }
+
     private async Task VerifyAccountOwnershipAsync(Guid userId, Guid accountId)
     {
         var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId)
             ?? throw new KeyNotFoundException("Account not found");
 
-        if (account.UserId != userId)
+        if (account.UserId == userId)
+            return;
+
+        var isJunior = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId && j.ParentUserId == userId);
+        if (!isJunior)
             throw new UnauthorizedAccessException("Access denied");
     }
 

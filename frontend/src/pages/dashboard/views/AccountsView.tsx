@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { createAccount, createJuniorAccount, getJuniorAccounts } from '../../../api/accounts';
 import type { Account, JuniorAccount } from '../../../api/accounts';
+import { getPendingApprovalTransfers } from '../../../api/transfers';
+import type { PendingApprovalTransfer } from '../../../api/transfers';
 import AccountCard from '../components/AccountCard';
 import JuniorAccountList from '../components/JuniorAccountList';
 import { useToast } from '../../../context/ToastContext';
@@ -13,6 +15,7 @@ export default function AccountsView({ accounts, onAccountCreated }: {
     const [loadingType, setLoadingType] = useState<'checking' | 'savings' | null>(null);
     const [juniorAccounts, setJuniorAccounts] = useState<JuniorAccount[]>([]);
     const [juniorLoading, setJuniorLoading] = useState(false);
+    const [pendingByAccount, setPendingByAccount] = useState<Record<string, PendingApprovalTransfer[]>>({});
     const [showJuniorForm, setShowJuniorForm] = useState(false);
     const [juniorParentAccountId, setJuniorParentAccountId] = useState('');
     const [juniorEmail, setJuniorEmail] = useState('');
@@ -22,13 +25,31 @@ export default function AccountsView({ accounts, onAccountCreated }: {
     const [juniorDob, setJuniorDob] = useState('');
     const [juniorLoading2, setJuniorLoading2] = useState(false);
 
-    useEffect(() => {
-        if (accounts.length === 0) return;
+    const loadJuniorsAndPending = (accs: Account[]) => {
+        if (accs.length === 0) return;
         setJuniorLoading(true);
-        setJuniorParentAccountId(accounts[0]?.id ?? '');
-        getJuniorAccounts(accounts[0].id)
-            .then(results => setJuniorAccounts(results))
+        setJuniorParentAccountId(accs[0]?.id ?? '');
+        Promise.all(accs.map(a => getJuniorAccounts(a.id)))
+            .then(results => {
+                const seen = new Set<string>();
+                const unique = results.flat().filter(j => seen.has(j.juniorAccountId) ? false : seen.add(j.juniorAccountId) && true);
+                setJuniorAccounts(unique);
+            })
             .finally(() => setJuniorLoading(false));
+        getPendingApprovalTransfers()
+            .then(all => {
+                const grouped: Record<string, PendingApprovalTransfer[]> = {};
+                for (const t of all) {
+                    if (!grouped[t.fromAccountId]) grouped[t.fromAccountId] = [];
+                    grouped[t.fromAccountId].push(t);
+                }
+                setPendingByAccount(grouped);
+            })
+            .catch(() => {});
+    };
+
+    useEffect(() => {
+        loadJuniorsAndPending(accounts);
     }, [accounts]);
 
     const handleCreateJunior = async () => {
@@ -61,30 +82,26 @@ export default function AccountsView({ accounts, onAccountCreated }: {
         }
     };
 
-    const canCreateMore = true;
-
     return (
         <div className="db-view">
             <div className="db-section-header db-mb">
                 <h1 className="db-view-title" style={{ margin: 0 }}>Accounts</h1>
-                {canCreateMore && (
-                    <div style={{ display: 'flex', gap: 8 }}>
-                        <button
-                            className="db-btn-secondary"
-                            onClick={() => handleCreate('checking')}
-                            disabled={loadingType !== null}
-                        >
-                            {loadingType === 'checking' ? 'Opening…' : '+ Checking account'}
-                        </button>
-                        <button
-                            className="db-btn-secondary"
-                            onClick={() => handleCreate('savings')}
-                            disabled={loadingType !== null}
-                        >
-                            {loadingType === 'savings' ? 'Opening…' : '+ Savings account'}
-                        </button>
-                    </div>
-                )}
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                        className="db-btn-secondary"
+                        onClick={() => handleCreate('checking')}
+                        disabled={loadingType !== null}
+                    >
+                        {loadingType === 'checking' ? 'Opening…' : '+ Checking account'}
+                    </button>
+                    <button
+                        className="db-btn-secondary"
+                        onClick={() => handleCreate('savings')}
+                        disabled={loadingType !== null}
+                    >
+                        {loadingType === 'savings' ? 'Opening…' : '+ Savings account'}
+                    </button>
+                </div>
             </div>
 
             {accounts.length === 0 ? (
@@ -149,7 +166,11 @@ export default function AccountsView({ accounts, onAccountCreated }: {
                 ) : juniorAccounts.length === 0 ? (
                     <p className="db-empty">No junior accounts linked to your accounts.</p>
                 ) : (
-                    <JuniorAccountList accounts={juniorAccounts} />
+                    <JuniorAccountList
+                        accounts={juniorAccounts}
+                        pendingByAccount={pendingByAccount}
+                        onPendingAction={() => loadJuniorsAndPending(accounts)}
+                    />
                 )}
             </div>
         </div>

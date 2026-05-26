@@ -72,6 +72,16 @@ export async function createJuniorAccount(parentAccountId: string, email: string
     return res.data;
 }
 
+export async function addJuniorCard(juniorAccountId: string, dailyLimit?: number, monthlyLimit?: number): Promise<Card> {
+    const res = await client.post<Card>(`/accounts/junior/${juniorAccountId}/card`, { dailyLimit, monthlyLimit });
+    return res.data;
+}
+
+export async function updateJuniorLimits(juniorAccountId: string, dailyLimit?: number, monthlyLimit?: number): Promise<Card> {
+    const res = await client.patch<Card>(`/accounts/${juniorAccountId}/junior-limit`, { dailyLimit, monthlyLimit });
+    return res.data;
+}
+
 export interface Card {
     id: string;
     accountId: string;
@@ -108,5 +118,10 @@ export async function getCard(accountId: string, cardId: string): Promise<Card> 
 
 export async function updateCardStatus(accountId: string, cardId: string, status: string): Promise<Card> {
     const res = await client.patch<Card>(`/accounts/${accountId}/cards/${cardId}/status`, { status });
+    return res.data;
+}
+
+export async function updateCardLimits(accountId: string, cardId: string, dailyLimit?: number, monthlyLimit?: number): Promise<Card> {
+    const res = await client.patch<Card>(`/accounts/${accountId}/cards/${cardId}/limits`, { dailyLimit, monthlyLimit });
     return res.data;
 }

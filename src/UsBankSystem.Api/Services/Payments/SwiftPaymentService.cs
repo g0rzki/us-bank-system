@@ -21,14 +21,13 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
         SwiftRequestValidator.Validate(request.Iban, request.Bic, request.ChargeBearer, request.Currency, request.ValueDate);
         var valueDate = SwiftRequestValidator.ResolveValueDate(request.ValueDate);
 
-        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
-            ?? throw new KeyNotFoundException("Source account not found or inactive");
+        var fromAccount = await ResolveFromAccountAsync(userId, request.FromAccountId);
 
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
             throw new ArgumentException("Insufficient funds");
 
-        if (await IsJuniorAccountAsync(fromAccount.Id))
+        if (await IsJuniorInitiatedAsync(userId, fromAccount.Id))
             return await CreatePendingApprovalAsync(fromAccount, null, request.Amount, request.Currency, TransferChannel.Swift, request.Description);
 
         var todaySwiftTotal = await GetTodayTransferTotalByChannelAsync(fromAccount.Id, TransferChannel.Swift);

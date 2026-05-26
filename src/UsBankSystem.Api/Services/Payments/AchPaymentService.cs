@@ -20,14 +20,13 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
         if (!CurrencyCode.IsValid(request.Currency))
             throw new ArgumentException($"Unsupported currency '{request.Currency}'");
 
-        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
-            ?? throw new KeyNotFoundException("Source account not found or inactive");
+        var fromAccount = await ResolveFromAccountAsync(userId, request.FromAccountId);
 
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
             throw new ArgumentException("Insufficient funds");
 
-        if (await IsJuniorAccountAsync(fromAccount.Id))
+        if (await IsJuniorInitiatedAsync(userId, fromAccount.Id))
             return await CreatePendingApprovalAsync(fromAccount, null, request.Amount, request.Currency, TransferChannel.Ach, request.Description);
 
         var config = paymentConfig.Value.Ach;

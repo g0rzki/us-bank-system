@@ -37,14 +37,12 @@ interface FormState {
     monthlyLimit: string;
 }
 
-const EMPTY_FORM: FormState = { type: 'debit', dailyLimit: '', monthlyLimit: '' };
-
-export default function CardsSection({ accountId }: { accountId: string }) {
+export default function CardsSection({ accountId, isJunior = false }: { accountId: string; isJunior?: boolean }) {
     const { showToast } = useToast();
     const [cards, setCards] = useState<Card[]>([]);
     const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
-    const [form, setForm] = useState<FormState>(EMPTY_FORM);
+    const [form, setForm] = useState<FormState>({ type: isJunior ? 'prepaid' : 'debit', dailyLimit: '', monthlyLimit: '' });
     const [submitting, setSubmitting] = useState(false);
     const [selectedCard, setSelectedCard] = useState<Card | null>(null);
 
@@ -57,6 +55,12 @@ export default function CardsSection({ accountId }: { accountId: string }) {
     }, [accountId]);
 
     const handleSubmit = async () => {
+        const d = form.dailyLimit ? parseFloat(form.dailyLimit) : null;
+        const m = form.monthlyLimit ? parseFloat(form.monthlyLimit) : null;
+        if (d != null && m != null && m < d) {
+            showToast('Monthly limit cannot be less than daily limit');
+            return;
+        }
         setSubmitting(true);
         try {
             const card = await registerCard(accountId, {
@@ -66,7 +70,7 @@ export default function CardsSection({ accountId }: { accountId: string }) {
             });
             setCards(prev => [card, ...prev]);
             setShowForm(false);
-            setForm(EMPTY_FORM);
+            setForm({ type: isJunior ? 'prepaid' : 'debit', dailyLimit: '', monthlyLimit: '' });
             showToast('Card registered successfully');
         } catch (e: any) {
             showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to register card');
@@ -81,12 +85,19 @@ export default function CardsSection({ accountId }: { accountId: string }) {
             setForm(prev => ({ ...prev, [key]: e.target.value })),
     });
 
+    const hasActiveCard = isJunior && cards.some(c => c.status !== 'expired');
+    const canAddCard = !loading && !hasActiveCard;
+
     return (
         <div className="db-section db-mt">
             <div className="db-section-header">
                 <h2>Cards</h2>
-                {!showForm && (
-                    <button className="db-btn-secondary" style={{ fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: 4 }} onClick={() => setShowForm(true)}>
+                {canAddCard && (
+                    <button
+                        className="db-btn-secondary"
+                        style={{ fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: 4 }}
+                        onClick={() => setShowForm(true)}
+                    >
                         <Plus size={14} /> Add card
                     </button>
                 )}
@@ -95,15 +106,17 @@ export default function CardsSection({ accountId }: { accountId: string }) {
             {showForm && (
                 <div className="db-modal-overlay" onClick={() => !submitting && setShowForm(false)}>
                     <div className="db-modal" onClick={e => e.stopPropagation()}>
-                        <h2 className="db-section-title">Register card</h2>
-                        <div className="db-form-field">
-                            <span className="db-label">Card type</span>
-                            <select className="db-input" {...field('type')}>
-                                {CARD_TYPES.map(t => (
-                                    <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
-                                ))}
-                            </select>
-                        </div>
+                        <h2 className="db-section-title">{isJunior ? 'Add prepaid card' : 'Register card'}</h2>
+                        {!isJunior && (
+                            <div className="db-form-field">
+                                <span className="db-label">Card type</span>
+                                <select className="db-input" {...field('type')}>
+                                    {CARD_TYPES.map(t => (
+                                        <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
                         <div className="db-form-field">
                             <span className="db-label">Daily limit (optional, $10–$10,000)</span>
                             <input className="db-input" type="number" min="10" max="10000" step="1" placeholder="e.g. 500" {...field('dailyLimit')} />
@@ -113,7 +126,7 @@ export default function CardsSection({ accountId }: { accountId: string }) {
                             <input className="db-input" type="number" min="50" max="100000" step="1" placeholder="e.g. 2000" {...field('monthlyLimit')} />
                         </div>
                         <div className="db-form-actions">
-                            <button className="db-btn-secondary" onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }} disabled={submitting}>
+                            <button className="db-btn-secondary" onClick={() => { setShowForm(false); setForm({ type: isJunior ? 'prepaid' : 'debit', dailyLimit: '', monthlyLimit: '' }); }} disabled={submitting}>
                                 Cancel
                             </button>
                             <button className="db-btn-primary" onClick={handleSubmit} disabled={submitting}>

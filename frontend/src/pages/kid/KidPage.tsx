@@ -10,11 +10,12 @@ import TransactionDetails from '../dashboard/components/TransactionDetails';
 import '../dashboard/DashboardPage.css';
 import '../../styles/TransferForm.css';
 
-type View = 'overview' | 'transfers' | 'history';
+type View = 'overview' | 'cards' | 'transfers' | 'history';
 type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift';
 
 const NAV_ITEMS: { id: View; label: string; icon: React.ReactNode }[] = [
     { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={16} /> },
+    { id: 'cards', label: 'Cards', icon: <CreditCard size={16} /> },
     { id: 'transfers', label: 'Transfers', icon: <ArrowLeftRight size={16} /> },
     { id: 'history', label: 'History', icon: <History size={16} /> },
 ];
@@ -87,9 +88,73 @@ export default function KidPage() {
 
             <main className="db-main">
                 {view === 'overview' && <OverviewView firstName={firstName} onNavigate={setView} />}
+                {view === 'cards' && <CardsView />}
                 {view === 'transfers' && <TransferView />}
                 {view === 'history' && <HistoryView />}
             </main>
+        </div>
+    );
+}
+
+function CardsView() {
+    const [account, setAccount] = useState<Account | null>(null);
+    const [card, setCard] = useState<import('../../api/accounts').Card | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        getKidAccount()
+            .then(acc => {
+                setAccount(acc);
+                return kidClient.get<import('../../api/accounts').Card[]>(`/accounts/${acc.id}/cards`);
+            })
+            .then(res => setCard(res.data.find(c => c.type === 'prepaid') ?? res.data[0] ?? null))
+            .finally(() => setLoading(false));
+    }, []);
+
+    if (loading) return <div className="db-view"><div className="db-loading">Loading...</div></div>;
+
+    return (
+        <div className="db-view">
+            <h1 className="db-view-title">My card</h1>
+            {!card ? (
+                <p className="db-empty">No card yet — ask your parent to add one.</p>
+            ) : (
+                <div className="db-kid-card">
+                    <div className="db-kid-card-top">
+                        <span className="db-kid-card-bank">US Bank</span>
+                        <span className={`db-card-status-badge db-card-status-${card.status}`}>
+                            {card.status.charAt(0).toUpperCase() + card.status.slice(1)}
+                        </span>
+                    </div>
+                    <div className="db-kid-card-number">•••• •••• •••• {card.last4}</div>
+                    <div className="db-kid-card-bottom">
+                        <div className="db-kid-card-field">
+                            <span className="db-kid-card-field-label">Expires</span>
+                            <span className="db-kid-card-field-value">
+                                {new Date(card.expiresAt).toLocaleDateString('en-US', { month: '2-digit', year: '2-digit' })}
+                            </span>
+                        </div>
+                        <div className="db-kid-card-field">
+                            <span className="db-kid-card-field-label">Type</span>
+                            <span className="db-kid-card-field-value">Prepaid</span>
+                        </div>
+                    </div>
+                    <div className="db-kid-card-limits">
+                        <div className="db-account-popup-row">
+                            <span className="db-account-popup-label">Daily limit</span>
+                            <span className="db-account-popup-value">{card.dailyLimit != null ? `$${card.dailyLimit.toFixed(2)}` : 'No limit'}</span>
+                        </div>
+                        <div className="db-account-popup-row">
+                            <span className="db-account-popup-label">Monthly limit</span>
+                            <span className="db-account-popup-value">{card.monthlyLimit != null ? `$${card.monthlyLimit.toFixed(2)}` : 'No limit'}</span>
+                        </div>
+                        <div className="db-account-popup-row">
+                            <span className="db-account-popup-label">Account</span>
+                            <span className="db-account-popup-value">{account?.accountNumber ?? '—'}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

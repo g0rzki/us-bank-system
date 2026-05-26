@@ -60,6 +60,18 @@ public class CardsController(CardService cardService) : ControllerBase
         return Ok(await cardService.UpdateCardStatusAsync(userId, accountId, cardId, request));
     }
 
+    [HttpPatch("{cardId:guid}/limits")]
+    [ProducesResponseType(typeof(CardResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateCardLimits(Guid accountId, Guid cardId, [FromBody] UpdateCardLimitsRequest request)
+    {
+        var userId = UserId();
+        return Ok(await cardService.UpdateCardLimitsAsync(userId, accountId, cardId, request));
+    }
+
     private Guid UserId() =>
         Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
 }
