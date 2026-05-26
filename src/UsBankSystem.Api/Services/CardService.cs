@@ -71,7 +71,17 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         if (!CardStatus.IsUserSettable(request.Status))
             throw new ArgumentException($"Invalid status '{request.Status}'. Allowed: {CardStatus.Active}, {CardStatus.Blocked}");
 
-        await VerifyAccountOwnershipAsync(userId, accountId);
+        var isJuniorAccount = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId);
+        if (isJuniorAccount)
+        {
+            var isParent = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId && j.ParentUserId == userId);
+            if (!isParent)
+                throw new UnauthorizedAccessException("Only a parent can change junior card status");
+        }
+        else
+        {
+            await VerifyAccountOwnershipAsync(userId, accountId);
+        }
 
         var card = await db.Cards.FirstOrDefaultAsync(c => c.Id == cardId && c.AccountId == accountId)
             ?? throw new KeyNotFoundException("Card not found");
