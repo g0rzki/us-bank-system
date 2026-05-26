@@ -132,17 +132,19 @@ public class JuniorService(AppDbContext db)
         if (exists)
             throw new InvalidOperationException("Junior account already has an active prepaid card");
 
+        if (request.DailyLimit.HasValue && request.MonthlyLimit.HasValue && request.MonthlyLimit.Value < request.DailyLimit.Value)
+            throw new ArgumentException("Monthly limit cannot be less than daily limit");
+
         var card = new Card
         {
             Id = Guid.NewGuid(),
             AccountId = juniorAccountId,
-            Last4 = request.Last4,
+            Last4 = Random.Shared.Next(0, 10000).ToString("D4"),
             Type = CardType.Prepaid,
             Status = CardStatus.Active,
-            ExternalCardToken = request.ExternalCardToken,
             DailyLimit = request.DailyLimit,
             MonthlyLimit = request.MonthlyLimit,
-            ExpiresAt = request.ExpiresAt,
+            ExpiresAt = DateTime.UtcNow.AddYears(5),
             CreatedAt = DateTime.UtcNow
         };
 
@@ -166,6 +168,11 @@ public class JuniorService(AppDbContext db)
         var card = await db.Cards.FirstOrDefaultAsync(c => c.AccountId == juniorAccountId && c.Type == CardType.Prepaid && c.Status == CardStatus.Active)
             ?? throw new KeyNotFoundException("No active prepaid card found for this junior account");
 
+        var effectiveDaily = request.DailyLimit ?? card.DailyLimit;
+        var effectiveMonthly = request.MonthlyLimit ?? card.MonthlyLimit;
+        if (effectiveDaily.HasValue && effectiveMonthly.HasValue && effectiveMonthly.Value < effectiveDaily.Value)
+            throw new ArgumentException("Monthly limit cannot be less than daily limit");
+
         if (request.DailyLimit.HasValue)
             card.DailyLimit = request.DailyLimit.Value;
 
@@ -187,6 +194,7 @@ public class JuniorService(AppDbContext db)
         DailyLimit = card.DailyLimit,
         MonthlyLimit = card.MonthlyLimit,
         ExpiresAt = card.ExpiresAt,
+        BlockedAt = card.BlockedAt,
         CreatedAt = card.CreatedAt
     };
 }

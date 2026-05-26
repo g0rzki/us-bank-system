@@ -23,6 +23,8 @@ builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.AchPaymentService>
 builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.RtpPaymentService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.FedNowPaymentService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.SwiftPaymentService>();
+builder.Services.AddScoped<UsBankSystem.Api.Services.CardService>();
+builder.Services.AddHostedService<UsBankSystem.Api.Services.CardExpiryJob>();
 // CORS
 builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
     p.WithOrigins(builder.Configuration["Cors:Origin"] ?? "http://localhost:5173")
@@ -43,6 +45,8 @@ builder.Services.AddHttpClient<FedNowGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:FedNowUrl"] ?? "http://localhost:6003"));
 builder.Services.AddHttpClient<SwiftGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:SwiftUrl"] ?? "http://localhost:6004"));
+builder.Services.AddHttpClient<CardsGateway>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:CardsUrl"] ?? "http://localhost:6005"));
 
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
@@ -77,6 +81,8 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
+// Migrate and seed outside IsDevelopment() so Docker production containers
+// also apply migrations on startup without a separate migration step.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

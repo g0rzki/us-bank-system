@@ -20,14 +20,13 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
         if (!CurrencyCode.IsValid(request.Currency))
             throw new ArgumentException($"Unsupported currency '{request.Currency}'");
 
-        var fromAccount = await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.FromAccountId && a.UserId == userId && a.Status == AccountStatus.Active)
-            ?? throw new KeyNotFoundException("Source account not found or inactive");
+        var fromAccount = await ResolveFromAccountAsync(userId, request.FromAccountId);
 
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
             throw new ArgumentException("Insufficient funds");
 
-        if (await IsJuniorAccountAsync(fromAccount.Id))
+        if (await IsJuniorInitiatedAsync(userId, fromAccount.Id))
             return await CreatePendingApprovalAsync(fromAccount, null, request.Amount, request.Currency, TransferChannel.Ach, request.Description);
 
         var config = paymentConfig.Value.Ach;
@@ -52,9 +51,9 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
             CreatedAt = DateTime.UtcNow
         };
 
-        db.Transfers.Add(transfer);
-        db.Transactions.Add(CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Pending, request.Description ?? "ACH transfer", transfer.Id));
-        await db.SaveChangesAsync();
+        Db.Transfers.Add(transfer);
+        Db.Transactions.Add(CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Pending, request.Description ?? "ACH transfer", transfer.Id));
+        await Db.SaveChangesAsync();
 
         var gatewayResult = await achGateway.SendAsync(new(
             TransferId: transfer.Id,
@@ -72,12 +71,12 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
         {
             transfer.Status = TransferStatus.Failed;
             fromAccount.ReservedBalance -= request.Amount;
-            await db.SaveChangesAsync();
+            await Db.SaveChangesAsync();
             throw new ArgumentException(gatewayResult.Error ?? "ACH gateway error");
         }
 
         transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
-        await db.SaveChangesAsync();
+        await Db.SaveChangesAsync();
 
         var response = MapToResponse(transfer);
         response.EstimatedSettlement = nextBatch;

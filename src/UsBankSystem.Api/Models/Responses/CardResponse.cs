@@ -10,5 +10,6 @@ public class CardResponse
     public decimal? DailyLimit { get; set; }
     public decimal? MonthlyLimit { get; set; }
     public DateTime ExpiresAt { get; set; }
+    public DateTime? BlockedAt { get; set; }
     public DateTime CreatedAt { get; set; }
 }

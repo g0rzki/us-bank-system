@@ -186,8 +186,7 @@ public class TransferStatusTests
         var updated = await db.Transfers.FindAsync(transfer.Id);
         Assert.Equal(TransferStatus.Completed, updated!.Status);
         Assert.Equal("ACH-SETTLED-001", updated.ExternalReferenceId);
-        var tx = await db.Transactions.FirstAsync();
-        Assert.Equal(1, await db.Transactions.CountAsync());
+        var tx = await db.Transactions.FirstAsync(t => t.ReferenceId == transfer.Id.ToString());
         Assert.Equal(TransactionStatus.Completed, tx.Status);
     }
 

@@ -71,3 +71,57 @@ export async function createJuniorAccount(parentAccountId: string, email: string
     const res = await client.post<JuniorAccount>('/accounts/junior', { parentAccountId, email, password, firstName, lastName, dateOfBirth });
     return res.data;
 }
+
+export async function addJuniorCard(juniorAccountId: string, dailyLimit?: number, monthlyLimit?: number): Promise<Card> {
+    const res = await client.post<Card>(`/accounts/junior/${juniorAccountId}/card`, { dailyLimit, monthlyLimit });
+    return res.data;
+}
+
+export async function updateJuniorLimits(juniorAccountId: string, dailyLimit?: number, monthlyLimit?: number): Promise<Card> {
+    const res = await client.patch<Card>(`/accounts/${juniorAccountId}/junior-limit`, { dailyLimit, monthlyLimit });
+    return res.data;
+}
+
+export interface Card {
+    id: string;
+    accountId: string;
+    last4: string;
+    type: string;
+    status: string;
+    dailyLimit: number | null;
+    monthlyLimit: number | null;
+    expiresAt: string;
+    blockedAt: string | null;
+    createdAt: string;
+}
+
+export interface RegisterCardRequest {
+    type: string;
+    dailyLimit?: number;
+    monthlyLimit?: number;
+}
+
+export async function getCards(accountId: string): Promise<Card[]> {
+    const res = await client.get<Card[]>(`/accounts/${accountId}/cards`);
+    return res.data;
+}
+
+export async function registerCard(accountId: string, data: RegisterCardRequest): Promise<Card> {
+    const res = await client.post<Card>(`/accounts/${accountId}/cards`, data);
+    return res.data;
+}
+
+export async function getCard(accountId: string, cardId: string): Promise<Card> {
+    const res = await client.get<Card>(`/accounts/${accountId}/cards/${cardId}`);
+    return res.data;
+}
+
+export async function updateCardStatus(accountId: string, cardId: string, status: string): Promise<Card> {
+    const res = await client.patch<Card>(`/accounts/${accountId}/cards/${cardId}/status`, { status });
+    return res.data;
+}
+
+export async function updateCardLimits(accountId: string, cardId: string, dailyLimit?: number, monthlyLimit?: number): Promise<Card> {
+    const res = await client.patch<Card>(`/accounts/${accountId}/cards/${cardId}/limits`, { dailyLimit, monthlyLimit });
+    return res.data;
+}

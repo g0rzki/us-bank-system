@@ -12,7 +12,11 @@ public class TransactionService(AppDbContext db)
             ?? throw new KeyNotFoundException("Account not found");
 
         if (account.UserId != userId)
-            throw new UnauthorizedAccessException("Access denied");
+        {
+            var isJunior = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId && j.ParentUserId == userId);
+            if (!isJunior)
+                throw new UnauthorizedAccessException("Access denied");
+        }
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);

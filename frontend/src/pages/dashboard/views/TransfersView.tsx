@@ -3,7 +3,7 @@ import { getTransfers, getTransferStatus, getPendingApprovalTransfers } from '..
 import type { Transfer, TransferStatus, PendingApprovalTransfer } from '../../../api/transfers';
 import TransferStatusCard from '../components/TransferStatusCard';
 import PendingApprovalList from '../components/PendingApprovalList';
-import { getAccounts } from '../../../api/accounts';
+import { getAccounts, getJuniorAccounts } from '../../../api/accounts';
 import type { Account } from '../../../api/accounts';
 import TransferForm from '../components/TransferForm';
 import { useToast } from '../../../context/ToastContext';
@@ -32,17 +32,30 @@ export default function TransfersView() {
     const [accounts, setAccounts] = useState<Account[]>([]);
 
     useEffect(() => {
-        Promise.all([
-            getTransfers(),
-            getPendingApprovalTransfers(),
-            getAccounts(),
-        ]).then(([all, pending, accs]) => {
+        const load = async () => {
+            const [all, pending, accs] = await Promise.all([
+                getTransfers(),
+                getPendingApprovalTransfers(),
+                getAccounts(),
+            ]);
             setTransfers(all);
             setPendingApproval(pending);
-            setAccounts(accs);
-        }).catch(() => {
-            showToast('Failed to load transfers. Please try again.');
-        }).finally(() => setLoading(false));
+            const juniorResults = await Promise.all(accs.map(a => getJuniorAccounts(a.id)));
+            const seen = new Set<string>();
+            const juniorAsAccounts: Account[] = juniorResults.flat()
+                .filter(j => seen.has(j.juniorAccountId) ? false : seen.add(j.juniorAccountId) && true)
+                .map(j => ({
+                    id: j.accountId,
+                    accountNumber: j.accountNumber,
+                    type: `junior (${j.firstName})`,
+                    balance: j.balance,
+                    currency: j.currency,
+                    status: j.status,
+                    createdAt: j.createdAt,
+                }));
+            setAccounts([...accs, ...juniorAsAccounts]);
+        };
+        load().catch(() => showToast('Failed to load transfers. Please try again.')).finally(() => setLoading(false));
     }, []);
 
     const handleSelect = async (id: string) => {

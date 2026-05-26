@@ -544,7 +544,7 @@ public static class DbSeeder
         {
             new()
             {
-                Id = Guid.NewGuid(),
+                Id = new Guid("cccc0001-0000-0000-0000-000000000001"),
                 AccountId = account1Checking.Id,
                 Last4 = "4532",
                 Type = "debit",
@@ -555,25 +555,48 @@ public static class DbSeeder
             },
             new()
             {
-                Id = Guid.NewGuid(),
-                AccountId = account2Checking.Id,
-                Last4 = "8901",
+                Id = new Guid("cccc0002-0000-0000-0000-000000000002"),
+                AccountId = account1Savings.Id,
+                Last4 = "7741",
                 Type = "debit",
                 Status = "active",
                 ExternalCardToken = "tok_visa_debit_002",
+                ExpiresAt = DateTime.UtcNow.AddYears(4),
+                CreatedAt = account1Savings.CreatedAt.AddDays(2)
+            },
+            new()
+            {
+                Id = new Guid("cccc0003-0000-0000-0000-000000000003"),
+                AccountId = account2Checking.Id,
+                Last4 = "8901",
+                Type = "prepaid",
+                Status = "active",
+                ExternalCardToken = "tok_visa_prepaid_001",
                 ExpiresAt = DateTime.UtcNow.AddYears(2),
                 CreatedAt = account2Checking.CreatedAt.AddDays(1)
             },
             new()
             {
-                Id = Guid.NewGuid(),
+                Id = new Guid("cccc0004-0000-0000-0000-000000000004"),
                 AccountId = account1Checking.Id,
                 Last4 = "1234",
-                Type = "debit",
+                Type = "prepaid",
                 Status = "blocked",
-                ExternalCardToken = "tok_mc_credit_001",
-                ExpiresAt = DateTime.UtcNow.AddMonths(-2),
-                CreatedAt = account1Checking.CreatedAt.AddMonths(1)
+                BlockedAt = DateTime.UtcNow.AddHours(-25),
+                ExternalCardToken = "tok_mc_prepaid_001",
+                ExpiresAt = DateTime.UtcNow.AddYears(1),
+                CreatedAt = account1Checking.CreatedAt.AddDays(3)
+            },
+            new()
+            {
+                Id = new Guid("cccc0005-0000-0000-0000-000000000005"),
+                AccountId = account1Checking.Id,
+                Last4 = "9999",
+                Type = "prepaid",
+                Status = "expired",
+                ExternalCardToken = "tok_mc_prepaid_old",
+                ExpiresAt = DateTime.UtcNow.AddMonths(-3),
+                CreatedAt = account1Checking.CreatedAt.AddMonths(-24)
             }
         };
 

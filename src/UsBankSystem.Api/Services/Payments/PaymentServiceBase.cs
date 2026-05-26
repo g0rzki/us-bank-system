@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using UsBankSystem.Api.Models.Responses;
+using UsBankSystem.Core.Domain.Common;
 using UsBankSystem.Core.Domain.Transactions;
 using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Core.Entities;
@@ -10,6 +11,8 @@ namespace UsBankSystem.Api.Services.Payments;
 
 public abstract class PaymentServiceBase(AppDbContext db)
 {
+    protected AppDbContext Db => db;
+
     protected async Task<TransferResponse> CreatePendingApprovalAsync(
         Account fromAccount, Guid? toAccountId, decimal amount, string currency, string channel, string? description)
     {
@@ -34,8 +37,23 @@ public abstract class PaymentServiceBase(AppDbContext db)
         return MapToResponse(transfer);
     }
 
-    protected async Task<bool> IsJuniorAccountAsync(Guid accountId) =>
-        await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId);
+    protected async Task<Account> ResolveFromAccountAsync(Guid userId, Guid accountId)
+    {
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId && a.Status == AccountStatus.Active)
+            ?? throw new KeyNotFoundException("Source account not found or inactive");
+
+        if (account.UserId == userId)
+            return account;
+
+        var isParent = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId && j.ParentUserId == userId);
+        if (!isParent)
+            throw new KeyNotFoundException("Source account not found or inactive");
+
+        return account;
+    }
+
+    protected async Task<bool> IsJuniorInitiatedAsync(Guid userId, Guid accountId) =>
+        await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId && j.Account.UserId == userId);
 
     protected async Task<decimal?> GetDailyTransferLimitAsync(Guid accountId)
     {
