@@ -51,9 +51,9 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
             CreatedAt = DateTime.UtcNow
         };
 
-        db.Transfers.Add(transfer);
-        db.Transactions.Add(CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Pending, request.Description ?? "ACH transfer", transfer.Id));
-        await db.SaveChangesAsync();
+        Db.Transfers.Add(transfer);
+        Db.Transactions.Add(CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Pending, request.Description ?? "ACH transfer", transfer.Id));
+        await Db.SaveChangesAsync();
 
         var gatewayResult = await achGateway.SendAsync(new(
             TransferId: transfer.Id,
@@ -71,12 +71,12 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
         {
             transfer.Status = TransferStatus.Failed;
             fromAccount.ReservedBalance -= request.Amount;
-            await db.SaveChangesAsync();
+            await Db.SaveChangesAsync();
             throw new ArgumentException(gatewayResult.Error ?? "ACH gateway error");
         }
 
         transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
-        await db.SaveChangesAsync();
+        await Db.SaveChangesAsync();
 
         var response = MapToResponse(transfer);
         response.EstimatedSettlement = nextBatch;

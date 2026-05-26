@@ -20,8 +20,8 @@ public class InternalPaymentService(AppDbContext db) : PaymentServiceBase(db)
         var fromAccount = await ResolveFromAccountAsync(userId, request.FromAccountId);
 
         var toAccount = request.ToAccountId.HasValue
-            ? await db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId.Value && a.Status == AccountStatus.Active)
-            : await db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == request.ToAccountNumber && a.Status == AccountStatus.Active);
+            ? await Db.Accounts.FirstOrDefaultAsync(a => a.Id == request.ToAccountId.Value && a.Status == AccountStatus.Active)
+            : await Db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == request.ToAccountNumber && a.Status == AccountStatus.Active);
         if (toAccount is null)
             throw new KeyNotFoundException("Destination account not found or inactive");
 
@@ -59,13 +59,13 @@ public class InternalPaymentService(AppDbContext db) : PaymentServiceBase(db)
         fromAccount.Balance -= request.Amount;
         toAccount.Balance += request.Amount;
 
-        db.Transactions.AddRange(
+        Db.Transactions.AddRange(
             CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Completed, request.Description ?? "Internal transfer", transfer.Id),
             CreateTransaction(toAccount.Id, request.Amount, TransactionType.Credit, TransactionStatus.Completed, request.Description ?? "Internal transfer", transfer.Id)
         );
 
-        db.Transfers.Add(transfer);
-        await db.SaveChangesAsync();
+        Db.Transfers.Add(transfer);
+        await Db.SaveChangesAsync();
         return MapToResponse(transfer);
     }
 }

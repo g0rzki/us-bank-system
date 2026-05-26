@@ -50,9 +50,9 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
             CreatedAt = DateTime.UtcNow
         };
 
-        db.Transfers.Add(transfer);
-        db.Transactions.Add(CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Pending, request.Description ?? "SWIFT transfer", transfer.Id));
-        await db.SaveChangesAsync();
+        Db.Transfers.Add(transfer);
+        Db.Transactions.Add(CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Pending, request.Description ?? "SWIFT transfer", transfer.Id));
+        await Db.SaveChangesAsync();
 
         var gatewayResult = await swiftGateway.SendAsync(new(
             TransferId: transfer.Id,
@@ -75,12 +75,12 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
         {
             transfer.Status = TransferStatus.Failed;
             fromAccount.ReservedBalance -= request.Amount;
-            await db.SaveChangesAsync();
+            await Db.SaveChangesAsync();
             throw new ArgumentException(gatewayResult.Error ?? "SWIFT gateway error");
         }
 
         transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
-        await db.SaveChangesAsync();
+        await Db.SaveChangesAsync();
         return MapToResponse(transfer);
     }
 }

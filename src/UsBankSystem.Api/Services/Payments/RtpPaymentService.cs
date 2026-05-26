@@ -22,7 +22,7 @@ public class RtpPaymentService(AppDbContext db, RtpGateway rtpGateway, IOptions<
 
         var fromAccount = await ResolveFromAccountAsync(userId, request.FromAccountId);
 
-        var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == request.ToAccountNumber && a.Status == AccountStatus.Active)
+        var toAccount = await Db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == request.ToAccountNumber && a.Status == AccountStatus.Active)
             ?? throw new KeyNotFoundException("Destination account not found or inactive");
 
         if (fromAccount.Id == toAccount.Id)
@@ -52,8 +52,8 @@ public class RtpPaymentService(AppDbContext db, RtpGateway rtpGateway, IOptions<
             CreatedAt = DateTime.UtcNow
         };
 
-        db.Transfers.Add(transfer);
-        await db.SaveChangesAsync();
+        Db.Transfers.Add(transfer);
+        await Db.SaveChangesAsync();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(paymentConfig.Value.Rtp.TimeoutSeconds));
         var gatewayResult = await rtpGateway.SendAsync(new(
@@ -68,7 +68,7 @@ public class RtpPaymentService(AppDbContext db, RtpGateway rtpGateway, IOptions<
         {
             transfer.Status = TransferStatus.Failed;
             fromAccount.ReservedBalance -= request.Amount;
-            await db.SaveChangesAsync();
+            await Db.SaveChangesAsync();
             throw new ArgumentException(gatewayResult.Error ?? "RTP gateway error");
         }
 
@@ -79,12 +79,12 @@ public class RtpPaymentService(AppDbContext db, RtpGateway rtpGateway, IOptions<
         transfer.CompletedAt = DateTime.UtcNow;
         transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
 
-        db.Transactions.AddRange(
+        Db.Transactions.AddRange(
             CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Completed, request.Description ?? "RTP transfer", transfer.Id),
             CreateTransaction(toAccount.Id, request.Amount, TransactionType.Credit, TransactionStatus.Completed, request.Description ?? "RTP transfer", transfer.Id)
         );
 
-        await db.SaveChangesAsync();
+        await Db.SaveChangesAsync();
         return MapToResponse(transfer);
     }
 }

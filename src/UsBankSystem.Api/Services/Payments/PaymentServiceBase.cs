@@ -11,6 +11,8 @@ namespace UsBankSystem.Api.Services.Payments;
 
 public abstract class PaymentServiceBase(AppDbContext db)
 {
+    protected AppDbContext Db => db;
+
     protected async Task<TransferResponse> CreatePendingApprovalAsync(
         Account fromAccount, Guid? toAccountId, decimal amount, string currency, string channel, string? description)
     {
