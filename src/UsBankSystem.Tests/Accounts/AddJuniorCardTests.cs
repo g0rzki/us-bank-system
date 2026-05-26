@@ -97,8 +97,6 @@ public class AddJuniorCardTests
 
     private static AddJuniorCardRequest ValidRequest() => new()
     {
-        Last4 = "9001",
-        ExpiresAt = DateTime.UtcNow.AddYears(3),
         DailyLimit = 50m,
         MonthlyLimit = 300m
     };

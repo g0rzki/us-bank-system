@@ -136,13 +136,12 @@ public class JuniorService(AppDbContext db)
         {
             Id = Guid.NewGuid(),
             AccountId = juniorAccountId,
-            Last4 = request.Last4,
+            Last4 = Random.Shared.Next(0, 10000).ToString("D4"),
             Type = CardType.Prepaid,
             Status = CardStatus.Active,
-            ExternalCardToken = request.ExternalCardToken,
             DailyLimit = request.DailyLimit,
             MonthlyLimit = request.MonthlyLimit,
-            ExpiresAt = request.ExpiresAt,
+            ExpiresAt = DateTime.UtcNow.AddYears(5),
             CreatedAt = DateTime.UtcNow
         };
 
@@ -187,6 +186,7 @@ public class JuniorService(AppDbContext db)
         DailyLimit = card.DailyLimit,
         MonthlyLimit = card.MonthlyLimit,
         ExpiresAt = card.ExpiresAt,
+        BlockedAt = card.BlockedAt,
         CreatedAt = card.CreatedAt
     };
 }

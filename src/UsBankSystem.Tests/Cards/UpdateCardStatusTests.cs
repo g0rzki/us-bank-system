@@ -33,7 +33,7 @@ public class UpdateCardStatusTests
             .Build();
 
     private CardsGateway CreateGateway() =>
-        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{\"cardToken\":\"tok_test\"}")),
+        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{\"cardToken\":\"tok_test\"}")) { BaseAddress = new Uri("http://localhost:6005") },
             NullLogger<CardsGateway>.Instance);
 
     private CardsController CreateController(AppDbContext db, Guid userId)

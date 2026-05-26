@@ -81,6 +81,8 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
+// Migrate and seed outside IsDevelopment() so Docker production containers
+// also apply migrations on startup without a separate migration step.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
