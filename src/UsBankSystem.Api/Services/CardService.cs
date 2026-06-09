@@ -6,6 +6,7 @@ using UsBankSystem.Core.Domain.Cards;
 using UsBankSystem.Core.Entities;
 using UsBankSystem.Infrastructure.Persistence;
 using Card = UsBankSystem.Core.Entities.Card;
+using TopUpCardRequest = UsBankSystem.Api.Models.Requests.TopUpCardRequest;
 
 namespace UsBankSystem.Api.Services;
 
@@ -47,11 +48,19 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         var last4 = Random.Shared.Next(0, 10000).ToString("D4");
         var expiresAt = DateTime.UtcNow.AddYears(5);
 
-        var gatewayResult = await RegisterWithGatewayAsync(accountId, request, last4, expiresAt);
+        var gatewayResult = await RegisterWithGatewayAsync(userId, accountId, request);
 
-        var card = CreateCardEntity(accountId, request, last4, expiresAt, gatewayResult.CardToken);
+        if (!gatewayResult.IsSuccess || gatewayResult.CardToken is null)
+            throw new GatewayUnavailableException("Card payment gateway is unavailable. Please try again later.");
+
+        var card = CreateCardEntity(accountId, request, last4, expiresAt, gatewayResult.CardToken, gatewayResult.MaskedPan);
         db.Cards.Add(card);
         await db.SaveChangesAsync();
+
+        // Karty PREPAID wymagają ręcznego przejścia przez lifecycle w card-provider.
+        // Robimy to asynchronicznie — nie blokuje odpowiedzi dla klienta.
+        if (request.Type == CardType.Prepaid)
+            _ = ActivatePrepaidInBackgroundAsync(card.Id, gatewayResult.CardToken);
 
         return MapToResponse(card);
     }
@@ -62,6 +71,8 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
 
         var card = await db.Cards.FirstOrDefaultAsync(c => c.Id == cardId && c.AccountId == accountId)
             ?? throw new KeyNotFoundException("Card not found");
+
+        await SyncStatusFromGatewayAsync(card);
 
         return MapToResponse(card);
     }
@@ -94,6 +105,16 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
             var unblockAvailableAt = card.BlockedAt.Value.AddHours(24);
             if (DateTime.UtcNow < unblockAvailableAt)
                 throw new InvalidOperationException($"Card cannot be unblocked until {unblockAvailableAt:O}");
+        }
+
+        if (card.ExternalCardToken is not null)
+        {
+            var synced = request.Status == CardStatus.Blocked
+                ? await cardsGateway.BlockCardAsync(card.ExternalCardToken)
+                : await cardsGateway.UnblockCardAsync(card.ExternalCardToken);
+
+            if (!synced)
+                throw new GatewayUnavailableException("Card payment gateway is unavailable. Please try again later.");
         }
 
         card.Status = request.Status;
@@ -134,6 +155,99 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         return MapToResponse(card);
     }
 
+    public async Task<CardGatewayStatus?> GetExternalCardStatusAsync(Guid userId, Guid accountId, Guid cardId)
+    {
+        await VerifyAccountOwnershipAsync(userId, accountId);
+
+        var card = await db.Cards.FirstOrDefaultAsync(c => c.Id == cardId && c.AccountId == accountId)
+            ?? throw new KeyNotFoundException("Card not found");
+
+        if (card.ExternalCardToken is null)
+            return null;
+
+        return await cardsGateway.GetCardStatusAsync(card.ExternalCardToken);
+    }
+
+    public async Task<CardResponse> TopUpCardAsync(Guid userId, Guid accountId, Guid cardId, TopUpCardRequest request)
+    {
+        var isJuniorAccount = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId);
+        if (isJuniorAccount)
+        {
+            var isParent = await db.JuniorAccounts.AnyAsync(j => j.AccountId == accountId && j.ParentUserId == userId);
+            if (!isParent)
+                throw new UnauthorizedAccessException("Only a parent can top up a junior card");
+        }
+        else
+        {
+            await VerifyAccountOwnershipAsync(userId, accountId);
+        }
+
+        var card = await db.Cards.FirstOrDefaultAsync(c => c.Id == cardId && c.AccountId == accountId)
+            ?? throw new KeyNotFoundException("Card not found");
+
+        if (card.Type != CardType.Prepaid)
+            throw new InvalidOperationException("Only prepaid cards can be topped up");
+
+        if (card.Status == CardStatus.Expired)
+            throw new InvalidOperationException("Cannot top up an expired card");
+
+        if (card.ExternalCardToken is null)
+            throw new GatewayUnavailableException("Card is not linked to payment gateway.");
+
+        var ok = await cardsGateway.TopUpAsync(card.ExternalCardToken, request.Amount);
+        if (!ok)
+            throw new GatewayUnavailableException("Card payment gateway is unavailable. Please try again later.");
+
+        return MapToResponse(card);
+    }
+
+    private async Task SyncStatusFromGatewayAsync(Card card)
+    {
+        if (card.ExternalCardToken is null || card.Status == CardStatus.Expired)
+            return;
+
+        var external = await cardsGateway.GetCardStatusAsync(card.ExternalCardToken);
+        if (external?.Status is null)
+            return;
+
+        var mappedStatus = external.Status.ToUpperInvariant() switch
+        {
+            "ACTIVE"                                      => CardStatus.Active,
+            "BLOCKED"                                     => CardStatus.Blocked,
+            "EXPIRED" or "CANCELLED"                      => CardStatus.Expired,
+            // REQUESTED/PRODUCING/SHIPPED — karta jeszcze w drodze, traktujemy jako blocked
+            "REQUESTED" or "PRODUCING" or "SHIPPED"       => CardStatus.Blocked,
+            _                                             => card.Status
+        };
+
+        if (mappedStatus == card.Status)
+            return;
+
+        logger.LogInformation(
+            "Card {CardId} status synced from payment-gateway: {Old} → {New}",
+            card.Id, card.Status, mappedStatus);
+
+        card.Status = mappedStatus;
+        if (mappedStatus == CardStatus.Blocked && card.BlockedAt is null)
+            card.BlockedAt = DateTime.UtcNow;
+        else if (mappedStatus == CardStatus.Active)
+            card.BlockedAt = null;
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task ActivatePrepaidInBackgroundAsync(Guid cardId, string cardToken)
+    {
+        // Małe opóźnienie — card-provider potrzebuje chwili po CreateCard zanim przyjmie lifecycle
+        await Task.Delay(TimeSpan.FromSeconds(3));
+
+        var ok = await cardsGateway.ActivatePrepaidAsync(cardToken);
+        if (ok)
+            logger.LogInformation("Prepaid card {CardId} activated in payment-gateway (token {Token})", cardId, cardToken);
+        else
+            logger.LogWarning("Prepaid card {CardId} activation failed in payment-gateway (token {Token})", cardId, cardToken);
+    }
+
     private static void ValidateLimits(decimal? dailyLimit, decimal? monthlyLimit)
     {
         if (dailyLimit.HasValue && monthlyLimit.HasValue && monthlyLimit.Value < dailyLimit.Value)
@@ -160,25 +274,28 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
             throw new InvalidOperationException($"Account already has an active {type} card");
     }
 
-    private async Task<CardsGatewayResult> RegisterWithGatewayAsync(Guid accountId, RegisterCardRequest request, string last4, DateTime expiresAt)
+    private async Task<CardsGatewayResult> RegisterWithGatewayAsync(Guid userId, Guid accountId, RegisterCardRequest request)
     {
-        var gatewayRequest = new RegisterCardGatewayRequest(
-            AccountId: accountId.ToString(),
-            Last4: last4,
-            Type: request.Type,
-            ExpiresAt: expiresAt.ToString("yyyy-MM-dd"),
-            DailyLimit: request.DailyLimit,
-            MonthlyLimit: request.MonthlyLimit);
+        // Obie karty (debit i prepaid) rejestrujemy jako VIRTUAL — auto-aktywacja po max 1h (60s w dev).
+        // Karta "debit" w naszym systemie to karta elektroniczna, nie fizyczna.
+        var cardType = request.Type == CardType.Prepaid ? "PREPAID" : "VIRTUAL";
+        var initialBalance = 0.0; // saldo ładowane przez topup, nie przy rejestracji
 
-        var result = await cardsGateway.RegisterCardAsync(gatewayRequest);
+        var gatewayRequest = new IssueCardGatewayRequest(
+            UserId: userId.ToString(),
+            AccountId: accountId.ToString(),
+            CardType: cardType,
+            InitialBalance: initialBalance);
+
+        var result = await cardsGateway.IssueCardAsync(gatewayRequest);
 
         if (!result.IsSuccess)
-            logger.LogWarning("Cards gateway registration failed for account {AccountId}: {Error}", accountId, result.Error);
+            logger.LogWarning("Cards gateway issue failed for account {AccountId}: {Error}", accountId, result.Error);
 
         return result;
     }
 
-    private static Card CreateCardEntity(Guid accountId, RegisterCardRequest request, string last4, DateTime expiresAt, string? externalToken) => new()
+    private static Card CreateCardEntity(Guid accountId, RegisterCardRequest request, string last4, DateTime expiresAt, string? externalToken, string? maskedPan) => new()
     {
         Id = Guid.NewGuid(),
         AccountId = accountId,
@@ -186,6 +303,7 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         Type = request.Type,
         Status = CardStatus.Active,
         ExternalCardToken = externalToken,
+        MaskedPan = maskedPan,
         DailyLimit = request.DailyLimit,
         MonthlyLimit = request.MonthlyLimit,
         ExpiresAt = expiresAt,
@@ -197,6 +315,8 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         Id = card.Id,
         AccountId = card.AccountId,
         Last4 = card.Last4,
+        MaskedPan = card.MaskedPan,
+        ExternalCardToken = card.ExternalCardToken,
         Type = card.Type,
         Status = card.Status,
         DailyLimit = card.DailyLimit,
