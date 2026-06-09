@@ -42,13 +42,36 @@ Aplikacja webowa symulująca działanie amerykańskiego banku detalicznego. Proj
 > 📝 TODO (US-57) — opis sieci korespondentów, IBAN, BIC, SWIFT gpi
 
 ### Karty płatnicze
-> 📝 TODO (US-58) — opis autoryzacji, rozliczenia, rola issuera, acquirera, sieci kartowej
+
+Integracja z zewnętrznym systemem **Karty-Platnicze-Aplikacje-Biznesowe** (payment-gateway + card-provider).
+
+**Typy kart:**
+- **Debit** — podpięta do konta bankowego, brak własnego salda. Rejestrowana jako `VIRTUAL` w payment-gateway, auto-aktywuje się w ciągu ~60s.
+- **Prepaid** — ma własne saldo w payment-gateway. Po rejestracji bank automatycznie przeprowadza kartę przez lifecycle (`REQUESTED → PRODUCING → SHIPPED → ACTIVE`) i kartę można od razu doładować (topup).
+
+**Przepływ płatności:**
+1. Klient przykłada kartę do terminala POS
+2. POS wywołuje autoryzację w payment-gateway → `APPROVED` / `DECLINED`
+3. Card-provider po max 30s (dev) / 24h (prod) wysyła settlement `POST /capture` do banku
+4. Bank zapisuje transakcję w historii konta
+
+**Ograniczenia:**
+- Jedno aktywne konto może mieć max 1 aktywną kartę debitową i 1 aktywną prepaid
+- Konto junior może mieć wyłącznie kartę prepaid (max 1 aktywna)
+- Zablokowana karta może zostać odblokowana dopiero po 24h od zablokowania
+- Topup dostępny tylko dla kart prepaid w statusie `active`
 
 ### BLIK
 > 📝 TODO (US-58) — opis mechanizmu, kod 6-cyfrowy, settlement przez RTP
 
 ### Konto junior
-> 📝 TODO (US-58) — opis mechanizmu zatwierdzania transakcji przez rodzica, karta prepaid, limity
+
+Konto powiązane z kontem rodzica dla dzieci w wieku 7–13 lat.
+
+- Każda transakcja inicjowana przez juniora trafia do statusu `pending_approval` i wymaga zatwierdzenia przez rodzica
+- Rodzic widzi listę oczekujących transakcji i może je zatwierdzić lub odrzucić
+- Junior może mieć jedną kartę prepaid z limitem dziennym i miesięcznym ustawianym przez rodzica
+- Topup karty juniora wykonuje rodzic
  
 ---
 
@@ -177,21 +200,26 @@ cp .env.example .env
 Otwórz `.env` i uzupełnij:
 
 ```env
-POSTGRES_DB=usbank          # nazwa bazy — zostaw bez zmian
-POSTGRES_USER=twoj_user     # dowolna nazwa użytkownika bazy
+POSTGRES_DB=usbank               # nazwa bazy — zostaw bez zmian
+POSTGRES_USER=twoj_user          # dowolna nazwa użytkownika bazy
 POSTGRES_PASSWORD=twoje_haslo
-POSTGRES_PORT=5433          # port na hoście (5433 jeśli lokalny postgres zajmuje 5432)
-API_URL=http://localhost:5100  # adres API — używany przez frontend (dev i Docker)
-JWT_SECRET=min_32_znaki     # dowolny ciąg min. 32 znaków
-WEBHOOK_SECRET=dowolny_sekret  # używany przez mock gateway do wysyłania webhooków
-CORS_ORIGIN=http://localhost:3000
+POSTGRES_PORT=5433               # port na hoście (5433 jeśli lokalny postgres zajmuje 5432)
+FRONTEND_PORT=3000               # port frontendu — kontroluje Docker i CORS jednocześnie
+API_URL=http://localhost:5100    # adres API — używany przez frontend
+JWT_SECRET=min_32_znaki          # dowolny ciąg min. 32 znaków
+WEBHOOK_SECRET=dowolny_sekret    # używany przez mock gateway do wysyłania webhooków
 INTEGRATIONS_ACH_URL=http://localhost:6001
 INTEGRATIONS_RTP_URL=http://localhost:6002
 INTEGRATIONS_FEDNOW_URL=http://localhost:6003
 INTEGRATIONS_SWIFT_URL=http://localhost:6004
-INTEGRATIONS_CARDS_URL=http://localhost:6005
+INTEGRATIONS_CARDS_URL=http://payment-gateway:8000   # adres payment-gateway w sieci Docker
 INTEGRATIONS_BLIK_URL=http://localhost:6006
+CARDS_API_KEY=bank-key-us-a
+CARDS_HMAC_SECRET=secret-us-a-hmac
+CARDS_ADMIN_KEY=admin-secret-key-2026
 ```
+
+> `FRONTEND_PORT` to jedyne miejsce gdzie ustawiasz port frontendu — `docker-compose.yaml` używa go zarówno do mapowania portów jak i do konfiguracji CORS w API.
 
 > Plik `.env` jest wykluczony z gita — nie commituj go.
 
@@ -224,12 +252,20 @@ Pierwsze uruchomienie pobiera obrazy i buduje kontenery — może potrwać kilka
 
 Aplikacja dostępna pod:
 
-| Serwis | URL                           |
-|---|-------------------------------|
-| Frontend | http://localhost:3000         |
-| API | http://localhost:5100         |
+| Serwis | URL |
+|---|---|
+| Frontend | http://localhost:3000 |
+| API | http://localhost:5100 |
 | Swagger UI | http://localhost:5100/swagger |
-| Health check | http://localhost:5100/health  |
+| Health check | http://localhost:5100/health |
+
+> Jeśli uruchamiasz razem z projektem **Karty-Platnicze-Aplikacje-Biznesowe**, po każdym `docker compose up` w us-bank-system musisz podłączyć kontener banku do sieci payment-gatewaya, żeby settlement działał:
+>
+> ```bash
+> docker network connect cards-backend us-bank-a
+> ```
+>
+> Bez tego card-provider nie może wysłać callbacku `/capture` do banku i transakcje kartowe nie pojawią się w historii konta. Patrz sekcja [Integracja z Karty-Platnicze](#integracja-z-karty-platnicze).
 
 ### Zatrzymanie aplikacji
 
@@ -269,34 +305,55 @@ us-bank-system/
 
 Pełna dokumentacja dostępna przez Swagger UI pod `/swagger` po uruchomieniu aplikacji.
 
-Główne endpointy:
+### Auth
 
 | Metoda | Endpoint | Opis |
 |---|---|---|
 | POST | /auth/register | Rejestracja użytkownika |
-| POST | /auth/login | Logowanie, zwraca JWT |
+| POST | /auth/login | Logowanie, zwraca JWT (ważny 1h) |
+
+### Konta
+
+| Metoda | Endpoint | Opis |
+|---|---|---|
+| POST | /accounts | Tworzenie konta checking/savings |
+| GET | /accounts | Lista kont zalogowanego użytkownika |
 | GET | /accounts/{id} | Dane konta |
 | GET | /accounts/{id}/balance | Saldo |
-| GET | /accounts/{id}/transactions | Historia transakcji z paginacją |
-| POST | /accounts | Tworzenie konta checking/savings |
-| POST | /accounts/junior | Tworzenie konta junior (wymaga parent_account_id) |
-| GET | /accounts/{id}/junior-accounts | Lista kont junior (widok rodzica) |
-| GET | /accounts/{id}/junior-details | Szczegóły konta junior |
-| PATCH | /accounts/{id}/junior-limit | Zmiana limitu karty prepaid przez rodzica |
-| GET | /transfers/pending-approval | Lista transakcji czekających na zatwierdzenie (rodzic) |
-| POST | /transfers/{id}/approve | Zatwierdzenie transakcji junior przez rodzica |
-| POST | /transfers/{id}/reject | Odrzucenie transakcji junior przez rodzica |
-| POST | /transfers/internal | Przelew wewnętrzny |
-| POST | /transfers/ach | Przelew ACH (T+1) |
+| GET | /accounts/{id}/transactions | Historia transakcji (paginacja: `?page=1&pageSize=20`) |
+| POST | /accounts/junior | Tworzenie konta junior |
+| GET | /accounts/{id}/junior-accounts | Lista kont junior podpiętych do konta rodzica |
+| POST | /accounts/junior/{id}/card | Dodanie karty prepaid do konta junior (tylko rodzic) |
+| PATCH | /accounts/{id}/junior-limit | Zmiana limitu karty prepaid juniora (tylko rodzic) |
+
+### Przelewy
+
+| Metoda | Endpoint | Opis |
+|---|---|---|
+| POST | /transfers/internal | Przelew wewnętrzny (natychmiastowy) |
+| POST | /transfers/ach | Przelew ACH (T+1, batch) |
 | POST | /transfers/rtp | Przelew RTP (real-time) |
 | POST | /transfers/fednow | Przelew FedNow (RTGS) |
-| POST | /transfers/swift | Przelew SWIFT |
+| POST | /transfers/swift | Przelew SWIFT (międzynarodowy) |
+| GET | /transfers | Lista przelewów użytkownika |
 | GET | /transfers/{id}/status | Status przelewu |
+| GET | /transfers/pending-approval | Przelewy juniora czekające na zatwierdzenie |
+| POST | /transfers/{id}/approve | Zatwierdzenie przelewu juniora przez rodzica |
+| POST | /transfers/{id}/reject | Odrzucenie przelewu juniora przez rodzica |
+| POST | /transfers/{id}/webhook | Webhook od mock gateway (zmiana statusu przelewu) |
+
+### Karty
+
+| Metoda | Endpoint | Opis |
+|---|---|---|
 | GET | /accounts/{id}/cards | Lista kart konta |
-| POST | /cards/register | Rejestracja karty |
-| POST | /cards/authorize | Webhook autoryzacji kartowej |
-| POST | /blik/generate | Generowanie kodu BLIK |
-| POST | /blik/verify | Weryfikacja kodu BLIK |
+| POST | /accounts/{id}/cards | Rejestracja karty (`type: "debit"` lub `"prepaid"`) |
+| GET | /accounts/{id}/cards/{cardId} | Szczegóły karty (synchronizuje status z payment-gateway) |
+| PATCH | /accounts/{id}/cards/{cardId}/status | Zmiana statusu (`blocked` / `active`) |
+| PATCH | /accounts/{id}/cards/{cardId}/limits | Ustawienie limitów dziennego/miesięcznego |
+| POST | /accounts/{id}/cards/{cardId}/topup | Doładowanie karty prepaid |
+| GET | /accounts/{id}/cards/{cardId}/external-status | Status karty w payment-gateway (saldo, limity) |
+| POST | /capture | Webhook od card-provider po settlement transakcji kartowej |
 
 ---
 
@@ -329,6 +386,110 @@ Czasy opóźnień są brane z `payment-config.json`.
 ```env
 INTEGRATIONS_ACH_URL=http://adres-modulu-ach
 ```
+
+---
+
+## Integracja z Karty-Platnicze
+
+Projekt integruje się z **Karty-Platnicze-Aplikacje-Biznesowe** — zewnętrznym systemem obsługi kart płatniczych składającym się z payment-gateway i card-providera.
+
+### Wymagania
+
+Projekt **Karty-Platnicze-Aplikacje-Biznesowe** musi być uruchomiony przed startem us-bank-system. Sklonuj i uruchom go według jego własnej dokumentacji.
+
+Po uruchomieniu dostępny jest pod:
+
+| Serwis | URL |
+|---|---|
+| Payment-gateway API | http://localhost:8072 |
+| Payment-gateway docs | http://localhost:8072/docs |
+| POS emulator (UI) | http://localhost:8072/pos |
+| Admin panel | http://localhost:3072 |
+
+### Konfiguracja sieci Docker
+
+Kontenery us-bank-system i Karty-Platnicze działają w osobnych sieciach. Żeby card-provider mógł wysyłać settlement (`/capture`) do banku, po każdym uruchomieniu us-bank-system wykonaj:
+
+```bash
+docker network connect cards-backend us-bank-a
+```
+
+Bez tego płatności kartowe będą zatwierdzane przez POS, ale **nie pojawią się w historii transakcji konta**.
+
+### Klucze API
+
+W `.env` projektu us-bank-system skonfigurowane są klucze do komunikacji z payment-gateway:
+
+```env
+CARDS_API_KEY=bank-key-us-a          # klucz banku do wystawiania i blokowania kart
+CARDS_HMAC_SECRET=secret-us-a-hmac   # sekret do podpisywania żądań HMAC-SHA256
+CARDS_ADMIN_KEY=admin-secret-key-2026 # klucz admina (lifecycle prepaid, full-pan w testach)
+```
+
+### Jak wykonać płatność kartą (testowo)
+
+1. Zaloguj się do frontendu i zarejestruj kartę (debit lub prepaid)
+2. Dla prepaid: poczekaj ~6s na aktywację, następnie doładuj kartę przyciskiem "Top up card" w szczegółach karty
+3. Skopiuj "Payment token" z szczegółów karty
+4. Pobierz pełne dane karty (numer, CVV, data ważności):
+   ```bash
+   curl http://localhost:8072/api/v1/cards/<TOKEN>/full-pan \
+     -H "X-Admin-Key: admin-secret-key-2026"
+   ```
+5. Wejdź na http://localhost:8072/pos i wpisz dane karty, lub użyj curl:
+   ```bash
+   curl -X POST http://localhost:8072/api/v1/payments/authorize \
+     -H "Content-Type: application/json" \
+     -d '{"card_number":"<PAN>","expiry_month":<M>,"expiry_year":<YY>,"cvv":"<CVV>","amount":50.00,"currency":"USD"}'
+   ```
+6. Po ~30 sekundach transakcja pojawi się w historii konta (settlement przez `POST /capture`)
+
+### Przepływ techniczny
+
+```
+Frontend → POST /accounts/{id}/cards          # rejestracja karty
+         ← externalCardToken (tok_...)        # token do dalszej komunikacji z gateway
+
+POST /api/v1/payments/authorize (POS)         # autoryzacja płatności przez terminal
+         → APPROVED / DECLINED
+
+card-provider (po ~30s) → POST /capture       # settlement do banku
+         → transakcja zapisana w DB           # widoczna w historii konta
+```
+
+---
+
+## Testy
+
+Projekt zawiera skrypty do testowania przepływu end-to-end przez curl.
+
+### Happy path — pełny przepływ
+
+```bash
+bash test-flow.sh
+```
+
+Skrypt wykonuje: rejestrację użytkownika → login → utworzenie konta → rejestrację karty debitowej i prepaid → topup prepaid → płatność przez POS → zablokowanie karty debitowej. Na końcu wypisuje tokeny kart.
+
+### Edge cases
+
+```bash
+bash test-edge-cases.sh
+```
+
+Pokrywa 25 przypadków brzegowych:
+
+| Kategoria | Przykłady |
+|---|---|
+| Auth | Duplikat emaila, złe hasło, nieistniejący użytkownik |
+| Karty | Duplikat aktywnej karty, nieprawidłowy typ, monthly < daily |
+| Autoryzacja | Dostęp do cudzego konta → 403 |
+| Block/unblock | Cooldown 24h po zablokowaniu, próba ustawienia statusu `expired` |
+| Topup | Topup karty debitowej → 400, kwota ujemna/zerowa → 400 |
+| Limity | Puste body → 400, monthly < daily → 400 |
+| Capture webhook | Nieznany token → 200 SETTLED, kwota ujemna → 400 |
+| POS | Zablokowana karta → DECLINED, zły CVV → DECLINED, błędny PAN (Luhn) → 422 |
+| No-auth | Brak tokenu JWT → 401 |
 
 ---
 

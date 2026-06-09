@@ -17,6 +17,9 @@ services:
     build:
       context: .
       dockerfile: src/UsBankSystem.Api/Dockerfile
+    # Serwis dostępny pod nazwą 'us-bank-a' w sieci cards-frontend —
+    # card-provider oddzwania na http://us-bank-a:8000/capture przy settlement.
+    container_name: us-bank-a
     ports:
       - "5100:8080"
     environment:
@@ -24,18 +27,24 @@ services:
       - ConnectionStrings__Default=Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       - Jwt__Secret=${JWT_SECRET}
       - Webhook__Secret=${WEBHOOK_SECRET}
-      - Cors__Origin=${CORS_ORIGIN}
+      - Cors__Origin=http://localhost:${FRONTEND_PORT}
       - Integrations__AchUrl=http://mock-gateways:6001
       - Integrations__RtpUrl=http://mock-gateways:6002
       - Integrations__FedNowUrl=http://mock-gateways:6003
       - Integrations__SwiftUrl=http://mock-gateways:6004
       - Integrations__CardsUrl=${INTEGRATIONS_CARDS_URL}
       - Integrations__BlikUrl=${INTEGRATIONS_BLIK_URL}
+      - Cards__ApiKey=${CARDS_API_KEY}
+      - Cards__HmacSecret=${CARDS_HMAC_SECRET}
+      - Cards__AdminKey=${CARDS_ADMIN_KEY}
     depends_on:
       db:
         condition: service_healthy
       mock-gateways:
         condition: service_started
+    networks:
+      - default
+      - cards-frontend
     restart: unless-stopped
 
   frontend:
@@ -45,7 +54,7 @@ services:
       args:
         - VITE_API_URL=${API_URL}
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT}:80"
     depends_on:
       - api
     restart: unless-stopped
@@ -69,3 +78,9 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  cards-frontend:
+    # Zewnętrzna sieć zdefiniowana w docker-compose.yaml Karty-Platnicze-Aplikacje-Biznesowe.
+    # Uruchom tamten projekt pierwszy: docker compose -p karty up -d
+    external: true
