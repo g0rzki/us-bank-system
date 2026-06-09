@@ -86,6 +86,8 @@ export interface Card {
     id: string;
     accountId: string;
     last4: string;
+    maskedPan: string | null;
+    externalCardToken: string | null;
     type: string;
     status: string;
     dailyLimit: number | null;
@@ -123,5 +125,25 @@ export async function updateCardStatus(accountId: string, cardId: string, status
 
 export async function updateCardLimits(accountId: string, cardId: string, dailyLimit?: number, monthlyLimit?: number): Promise<Card> {
     const res = await client.patch<Card>(`/accounts/${accountId}/cards/${cardId}/limits`, { dailyLimit, monthlyLimit });
+    return res.data;
+}
+
+export async function topUpCard(accountId: string, cardId: string, amount: number): Promise<Card> {
+    const res = await client.post<Card>(`/accounts/${accountId}/cards/${cardId}/topup`, { amount });
+    return res.data;
+}
+
+export interface CardExternalStatus {
+    card_token: string;
+    masked_pan: string | null;
+    status: string;
+    card_type: string;
+    balance: number | null;
+    daily_limit: number | null;
+    bank_id: string | null;
+}
+
+export async function getCardExternalStatus(accountId: string, cardId: string): Promise<CardExternalStatus | null> {
+    const res = await client.get<CardExternalStatus>(`/accounts/${accountId}/cards/${cardId}/external-status`);
     return res.data;
 }
