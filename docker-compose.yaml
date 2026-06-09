@@ -8,6 +8,7 @@ services:
       - "6002:6002"
       - "6003:6003"
       - "6004:6004"
+      - "6006:6006"
     environment:
       - API_URL=http://api:8080
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
@@ -30,7 +31,9 @@ services:
       - Integrations__FedNowUrl=http://mock-gateways:6003
       - Integrations__SwiftUrl=http://mock-gateways:6004
       - Integrations__CardsUrl=${INTEGRATIONS_CARDS_URL}
-      - Integrations__BlikUrl=${INTEGRATIONS_BLIK_URL}
+      - Integrations__BlikUrl=http://mock-gateways:6006
+      - Integrations__KlikApiKey=dev-key
+      - Klik__WebhookSecret=${KLIK_WEBHOOK_SECRET}
     depends_on:
       db:
         condition: service_healthy
