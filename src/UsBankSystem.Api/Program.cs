@@ -6,6 +6,7 @@ using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Extensions;
 using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Middleware;
+using UsBankSystem.Api.Services;
 using UsBankSystem.Infrastructure.Persistence;
 
 DotNetEnv.Env.TraversePath().Load();
@@ -47,6 +48,10 @@ builder.Services.AddHttpClient<SwiftGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:SwiftUrl"] ?? "http://localhost:6004"));
 builder.Services.AddHttpClient<CardsGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:CardsUrl"] ?? "http://localhost:6005"));
+builder.Services.AddHttpClient<KlikApiClient>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:BlikUrl"] ?? "http://localhost:6006"));
+builder.Services.AddScoped<IKlikApiClient, KlikApiClient>();
+builder.Services.AddScoped<BlikService>();
 
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
