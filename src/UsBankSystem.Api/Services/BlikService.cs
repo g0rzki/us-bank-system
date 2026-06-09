@@ -100,7 +100,7 @@ public class BlikService(AppDbContext db, IKlikApiClient klikClient, ILogger<Bli
             Currency = payload.Currency,
             MerchantName = payload.MerchantName,
             IsOnUs = payload.IsOnUs,
-            ExpiryTime = payload.ExpiryTime,
+            ExpiryTime = payload.ExpiryTime.UtcDateTime,
             Status = BlikAuthorizationStatus.Pending,
             CreatedAt = DateTime.UtcNow
         };

@@ -26,7 +26,7 @@ public class KlikApiClient(HttpClient http, ILogger<KlikApiClient> logger, IConf
         }
 
         var res = JsonSerializer.Deserialize<GenerateResponse>(body, JsonOpts);
-        return new KlikGenerateCodeResult(true, res!.Code, res.ExpiresAt, null);
+        return new KlikGenerateCodeResult(true, res!.Code, res.ExpiresAt.UtcDateTime, null);
     }
 
     public async Task<KlikConfirmResult> ConfirmPaymentAsync(string transactionId, bool accepted, string? rejectReason, CancellationToken ct = default)
@@ -52,7 +52,7 @@ public class KlikApiClient(HttpClient http, ILogger<KlikApiClient> logger, IConf
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
-        request.Headers.Add("X-KLIK-Api-Key", apiKey);
+        request.Headers.Add("X-KLIK-Bank-Api-Key", apiKey);
         request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
 
         HttpResponseMessage response;
@@ -83,7 +83,7 @@ public class KlikApiClient(HttpClient http, ILogger<KlikApiClient> logger, IConf
     }
 
     private record GenerateRequest(string UserId, string Zone);
-    private record GenerateResponse(string Code, int ExpiresIn, DateTime ExpiresAt);
+    private record GenerateResponse(string Code, int ExpiresIn, DateTimeOffset ExpiresAt);
     private record ConfirmRequest(string TransactionId, string Status, string? RejectReason);
     private record KlikErrorEnvelope(KlikError Error);
     private record KlikError(string Code, string Message);
