@@ -11,6 +11,9 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Clear seed data from previous schema — rows have no valid UserId
+            migrationBuilder.Sql("DELETE FROM \"BlikCodes\";");
+
             migrationBuilder.DropColumn(
                 name: "CodeHash",
                 table: "BlikCodes");

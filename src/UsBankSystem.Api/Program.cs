@@ -50,7 +50,8 @@ builder.Services.AddHttpClient<CardsGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:CardsUrl"] ?? "http://localhost:6005"));
 builder.Services.AddHttpClient<KlikApiClient>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:BlikUrl"] ?? "http://localhost:6006"));
-builder.Services.AddScoped<IKlikApiClient, KlikApiClient>();
+// Resolve IKlikApiClient via the typed-HttpClient-factory instance (not a plain Scoped)
+builder.Services.AddScoped<IKlikApiClient>(sp => sp.GetRequiredService<KlikApiClient>());
 builder.Services.AddScoped<BlikService>();
 
 builder.Services.AddAuthorizationBuilder()
