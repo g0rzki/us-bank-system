@@ -44,8 +44,19 @@ Aplikacja webowa symulująca działanie amerykańskiego banku detalicznego. Proj
 ### Karty płatnicze
 > 📝 TODO (US-58) — opis autoryzacji, rozliczenia, rola issuera, acquirera, sieci kartowej
 
-### BLIK
-> 📝 TODO (US-58) — opis mechanizmu, kod 6-cyfrowy, settlement przez RTP
+### BLIK / KLIK C2B
+
+Integracja z systemem **KLIK** (akademicki klon BLIK). Bank jest klientem API KLIK i wystawia webhook.
+
+**Flow C2B:**
+1. Klient klika „Generuj kod" → bank wywołuje `POST /api/v1/codes/generate` w KLIK → dostaje 6-cyfrowy kod ważny 120s
+2. Klient pokazuje kod kasjerowi / terminalowi (agent)
+3. Agent wywołuje `POST /api/v1/payments/initiate` w KLIK → KLIK wysyła webhook `POST /klik/webhook/authorize` do banku
+4. Bank natychmiast odpowiada `{received: true}` i pokazuje użytkownikowi modal z kwotą i merchant_name
+5. Użytkownik zatwierdza lub odrzuca → bank wywołuje `POST /api/v1/payments/confirm` w KLIK i obciąża konto (ACCEPTED) lub odrzuca (REJECTED)
+
+**KLIK API key** i adres instancji konfigurowane przez env (`Integrations__BlikUrl`, `Integrations__KlikApiKey`).
+W dev: mock KLIK uruchomiony jako część `mock-gateways` na porcie **6006**.
 
 ### Konto junior
 > 📝 TODO (US-58) — opis mechanizmu zatwierdzania transakcji przez rodzica, karta prepaid, limity
@@ -96,15 +107,18 @@ flowchart LR
     C --> D[Settlement natychmiastowy]
 ```
 
-### Przepływ BLIK (BPMN)
-
-> 📝 TODO (US-54) — diagram przepływu: generowanie kodu → weryfikacja → settlement RTP
+### Przepływ KLIK C2B (BPMN)
 
 ```mermaid
-%% TODO (US-54): Uzupełnić diagram BPMN przepływu BLIK
 flowchart LR
-    A[Generowanie kodu] --> B[Weryfikacja]
-    B --> C[Settlement RTP]
+    A[POST /blik/generate] --> B[KLIK codes/generate]
+    B --> C[Kod 6-cyfrowy TTL 120s]
+    C --> D[Agent skanuje kod]
+    D --> E[KLIK → webhook /authorize]
+    E --> F[Modal Approve/Reject]
+    F --> G[POST /blik/id/approve|reject]
+    G --> H[KLIK payments/confirm]
+    H --> I[Debit konta / REJECTED]
 ```
 
 ### Przepływ zatwierdzania transakcji junior (BPMN)
@@ -230,6 +244,7 @@ Aplikacja dostępna pod:
 | API | http://localhost:5100         |
 | Swagger UI | http://localhost:5100/swagger |
 | Health check | http://localhost:5100/health  |
+| Mock KLIK C2B | http://localhost:6006         |
 
 ### Zatrzymanie aplikacji
 
@@ -254,7 +269,7 @@ us-bank-system/
 │   │   └── payment-config.json       # konfiguracja sesji płatności (timeouty, okna batch)
 │   ├── UsBankSystem.Core/            # Domain entities, interfaces
 │   ├── UsBankSystem.Infrastructure/  # EF Core, repositories
-│   ├── UsBankSystem.MockGateways/    # Mock stuby ACH/RTP/FedNow/SWIFT (porty 6001-6004)
+│   ├── UsBankSystem.MockGateways/    # Mock stuby ACH/RTP/FedNow/SWIFT/KLIK (porty 6001-6004, 6006)
 │   ├── UsBankSystem.Tests/           # Testy API
 │   └── UsBankSystem.MockGateways.Tests/ # Testy mock stubów
 ├── frontend/                         # React + Vite SPA
@@ -295,8 +310,13 @@ Główne endpointy:
 | GET | /accounts/{id}/cards | Lista kart konta |
 | POST | /cards/register | Rejestracja karty |
 | POST | /cards/authorize | Webhook autoryzacji kartowej |
-| POST | /blik/generate | Generowanie kodu BLIK |
-| POST | /blik/verify | Weryfikacja kodu BLIK |
+| POST | /blik/generate | Generowanie kodu BLIK (wywołuje KLIK API) |
+| GET | /blik/pending | Lista oczekujących autoryzacji BLIK |
+| POST | /blik/{id}/approve | Zatwierdź autoryzację BLIK (debit konta, potwierdź KLIK) |
+| POST | /blik/{id}/reject | Odrzuć autoryzację BLIK |
+| GET | /blik/transactions | Historia autoryzacji BLIK |
+| POST | /klik/webhook/authorize | Webhook przychodzący z KLIK (autoryzacja płatności) |
+| POST | /klik/webhook/ping | Webhook ping od KLIK (keepalive) |
 
 ---
 
@@ -310,7 +330,9 @@ INTEGRATIONS_RTP_URL=http://rtp-module
 INTEGRATIONS_FEDNOW_URL=http://fednow-module
 INTEGRATIONS_SWIFT_URL=http://swift-module
 INTEGRATIONS_CARDS_URL=http://cards-module
-INTEGRATIONS_BLIK_URL=http://blik-module
+INTEGRATIONS_BLIK_URL=http://klik-module      # adres KLIK API (mock: http://localhost:6006)
+INTEGRATIONS_KLIK_API_KEY=twoj_api_key        # klucz API od operatora KLIK
+KLIK_WEBHOOK_SECRET=opcjonalny_sekret         # nagłówek X-Webhook-Secret na /klik/webhook/*
 ```
 
 W środowisku deweloperskim każda integracja działa przez **mock stub** (`UsBankSystem.MockGateways`) — osobny serwis który symuluje realistyczne zachowanie każdego kanału:
@@ -321,8 +343,45 @@ W środowisku deweloperskim każda integracja działa przez **mock stub** (`UsBa
 | RTP | 6002 | Czeka kilka sekund i odpowiada synchronicznie `Completed` (real-time rail) |
 | FedNow | 6003 | Tak samo jak RTP |
 | SWIFT | 6004 | Odpowiada natychmiast, webhook po dłuższym czasie (settlement 1-5 dni roboczych) |
+| KLIK C2B | 6006 | Mock KLIK: generuje kody (TTL 120s), symuluje agenta (`POST /simulate/initiate`), przetwarza potwierdzenia z fee 1%+0.5% |
 
-Czasy opóźnień są brane z `payment-config.json`.
+Czasy opóźnień ACH/RTP/FedNow/SWIFT są brane z `payment-config.json`.
+
+#### Testowanie KLIK C2B z mockiem
+
+```bash
+# 1. Zaloguj się i zapisz token
+TOKEN=$(curl -s -X POST http://localhost:5100/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"john.doe@example.com","password":"Test123!"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+# 2. Wygeneruj kod BLIK (zastąp accountId ID konta z /accounts)
+curl -s -X POST http://localhost:5100/blik/generate \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"accountId":"aaaa1111-1111-1111-1111-111111111111"}'
+# → {"code":"123456","expiresAt":"...","expiresIn":119}
+
+# 3. Zasymuluj agenta — wpisz kod z poprzedniego kroku
+INIT=$(curl -s -X POST http://localhost:6006/simulate/initiate \
+  -H "Content-Type: application/json" \
+  -d '{"code":"123456","amount":25.00,"currency":"USD","merchant_name":"Coffee Corner","is_on_us":false}')
+echo $INIT
+# → {"transaction_id":"...","status":"pending"}
+
+# 4. Sprawdź oczekującą autoryzację
+curl -s http://localhost:5100/blik/pending -H "Authorization: Bearer $TOKEN"
+
+# 5. Zatwierdź (zastąp {authId} ID z kroku 4)
+curl -s -X POST http://localhost:5100/blik/{authId}/approve \
+  -H "Authorization: Bearer $TOKEN"
+# → {"status":"accepted","localTransactionId":"..."}
+
+# 6. Sprawdź status w KLIK (zastąp {txId} z INIT.transaction_id)
+curl -s http://localhost:6006/api/v1/payments/status/{txId}
+# → {"status":"COMPLETED","klik_fee":0.25,"agent_fee":0.125,"merchant_net":24.625}
+```
 
 Żeby przełączyć się z mocka na prawdziwy moduł — zmień odpowiedni URL w `.env` na adres modułu innej grupy, np.:
 
