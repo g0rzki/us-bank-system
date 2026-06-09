@@ -11,7 +11,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Transfer> Transfers => Set<Transfer>();
     public DbSet<Card> Cards => Set<Card>();
     public DbSet<BlikCode> BlikCodes => Set<BlikCode>();
-    public DbSet<JuniorAccount> JuniorAccounts => Set<JuniorAccount>(); 
+    public DbSet<BlikAuthorization> BlikAuthorizations => Set<BlikAuthorization>();
+    public DbSet<JuniorAccount> JuniorAccounts => Set<JuniorAccount>();
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -85,13 +86,35 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<BlikCode>(e =>
         {
             e.HasKey(b => b.Id);
-            e.Property(b => b.CodeHash).IsRequired();
+            e.Property(b => b.Code).IsRequired().HasMaxLength(6);
+            e.Property(b => b.Status).IsRequired().HasMaxLength(10).HasDefaultValue("active");
             e.HasOne(b => b.Account)
                 .WithMany(a => a.BlikCodes)
                 .HasForeignKey(b => b.AccountId);
+            e.HasOne(b => b.User)
+                .WithMany()
+                .HasForeignKey(b => b.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(b => new { b.AccountId, b.ExpiresAt });
+            e.HasIndex(b => b.UserId);
         });
-    
+
+        modelBuilder.Entity<BlikAuthorization>(e =>
+        {
+            e.HasKey(a => a.Id);
+            e.Property(a => a.KlikTransactionId).IsRequired().HasMaxLength(100);
+            e.HasIndex(a => a.KlikTransactionId).IsUnique();
+            e.Property(a => a.Amount).HasPrecision(18, 2);
+            e.Property(a => a.Currency).IsRequired().HasMaxLength(3);
+            e.Property(a => a.MerchantName).IsRequired().HasMaxLength(200);
+            e.Property(a => a.Status).IsRequired().HasMaxLength(10).HasDefaultValue("pending");
+            e.HasOne(a => a.User)
+                .WithMany()
+                .HasForeignKey(a => a.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(a => new { a.UserId, a.Status });
+        });
+
         modelBuilder.Entity<JuniorAccount>(e =>
         {
             e.HasKey(j => j.Id);

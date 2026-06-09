@@ -609,8 +609,9 @@ public static class DbSeeder
             {
                 Id = Guid.NewGuid(),
                 AccountId = account1Checking.Id,
-                CodeHash = BCryptHash("123456"),
-                Used = false,
+                UserId = user1.Id,
+                Code = "123456",
+                Status = "active",
                 ExpiresAt = DateTime.UtcNow.AddMinutes(2),
                 CreatedAt = DateTime.UtcNow
             },
@@ -618,8 +619,9 @@ public static class DbSeeder
             {
                 Id = Guid.NewGuid(),
                 AccountId = account2Checking.Id,
-                CodeHash = BCryptHash("654321"),
-                Used = true,
+                UserId = user2.Id,
+                Code = "654321",
+                Status = "used",
                 ExpiresAt = DateTime.UtcNow.AddMinutes(-5),
                 CreatedAt = DateTime.UtcNow.AddMinutes(-7)
             }
