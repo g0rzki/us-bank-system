@@ -150,6 +150,13 @@ public class BlikService(AppDbContext db, IKlikApiClient klikClient, ILogger<Bli
             return MapToResponse(auth);
         }
 
+        var confirmResult = await klikClient.ConfirmPaymentAsync(auth.KlikTransactionId, true, null);
+        if (!confirmResult.Success)
+        {
+            logger.LogError("KLIK confirm failed for transaction {TxId}: {Error}", auth.KlikTransactionId, confirmResult.Error);
+            throw new InvalidOperationException($"KLIK confirm failed: {confirmResult.Error}");
+        }
+
         account.Balance -= auth.Amount;
 
         var tx = new Transaction
@@ -166,8 +173,6 @@ public class BlikService(AppDbContext db, IKlikApiClient klikClient, ILogger<Bli
         db.Transactions.Add(tx);
 
         // TODO: is_on_us=true — credit merchant_net to merchant's account (not implemented in MVP)
-
-        await klikClient.ConfirmPaymentAsync(auth.KlikTransactionId, true, null);
 
         auth.Status = BlikAuthorizationStatus.Accepted;
         auth.DecidedAt = DateTime.UtcNow;
