@@ -50,6 +50,9 @@ public class CaptureController(AppDbContext db, ILogger<CaptureController> logge
             return Ok(new { status = "SETTLED" });
         }
 
+        var maskedPan = card.MaskedPan is not null ? $" ({card.MaskedPan})" : string.Empty;
+        var merchantPart = request.MerchantId is not null ? $" · {request.MerchantId}" : string.Empty;
+
         var transaction = new Transaction
         {
             Id = Guid.NewGuid(),
@@ -57,7 +60,7 @@ public class CaptureController(AppDbContext db, ILogger<CaptureController> logge
             Amount = (decimal)request.Amount,
             Type = "debit",
             Status = "completed",
-            Description = $"Card settlement: merchant {request.MerchantId}",
+            Description = $"Card payment{maskedPan}{merchantPart}",
             ReferenceId = request.AuthorizationCode,
             CreatedAt = DateTime.UtcNow
         };

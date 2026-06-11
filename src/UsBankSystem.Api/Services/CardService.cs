@@ -45,13 +45,13 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
             await EnsureNoDuplicateActiveCardAsync(accountId, request.Type);
         }
 
-        var last4 = Random.Shared.Next(0, 10000).ToString("D4");
-        var expiresAt = DateTime.UtcNow.AddYears(5);
-
         var gatewayResult = await RegisterWithGatewayAsync(userId, accountId, request);
 
         if (!gatewayResult.IsSuccess || gatewayResult.CardToken is null)
             throw new GatewayUnavailableException("Card payment gateway is unavailable. Please try again later.");
+
+        var last4 = ExtractLast4(gatewayResult.MaskedPan);
+        var expiresAt = BuildExpiryDate(gatewayResult.ExpiryMonth, gatewayResult.ExpiryYear);
 
         var card = CreateCardEntity(accountId, request, last4, expiresAt, gatewayResult.CardToken, gatewayResult.MaskedPan);
         db.Cards.Add(card);
@@ -309,6 +309,20 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         ExpiresAt = expiresAt,
         CreatedAt = DateTime.UtcNow
     };
+
+    private static string ExtractLast4(string? maskedPan)
+    {
+        if (maskedPan is null) return Random.Shared.Next(0, 10000).ToString("D4");
+        var digits = maskedPan.Replace(" ", "");
+        return digits.Length >= 4 ? digits[^4..] : Random.Shared.Next(0, 10000).ToString("D4");
+    }
+
+    private static DateTime BuildExpiryDate(int? month, int? year)
+    {
+        if (month is null || year is null) return DateTime.UtcNow.AddYears(5);
+        var fullYear = year < 100 ? 2000 + year.Value : year.Value;
+        return new DateTime(fullYear, month.Value, DateTime.DaysInMonth(fullYear, month.Value), 23, 59, 59, DateTimeKind.Utc);
+    }
 
     private static CardResponse MapToResponse(Card card) => new()
     {

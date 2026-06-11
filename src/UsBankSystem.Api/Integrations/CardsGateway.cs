@@ -41,7 +41,7 @@ public class CardsGateway(HttpClient httpClient, IConfiguration configuration, I
 
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             var result = JsonSerializer.Deserialize<IssueCardGatewayResponse>(responseBody, JsonOptions);
-            return CardsGatewayResult.Success(result?.CardToken, result?.MaskedPan);
+            return CardsGatewayResult.Success(result?.CardToken, result?.MaskedPan, result?.ExpiryMonth, result?.ExpiryYear);
         }
         catch (Exception ex)
         {
@@ -226,12 +226,15 @@ public record IssueCardGatewayResponse(
     [property: JsonPropertyName("card_token")] string? CardToken,
     [property: JsonPropertyName("masked_pan")] string? MaskedPan,
     [property: JsonPropertyName("status")] string? Status,
-    [property: JsonPropertyName("card_type")] string? CardType);
+    [property: JsonPropertyName("card_type")] string? CardType,
+    [property: JsonPropertyName("expiry_month")] int? ExpiryMonth,
+    [property: JsonPropertyName("expiry_year")] int? ExpiryYear);
 
-public record CardsGatewayResult(bool IsSuccess, string? CardToken, string? MaskedPan, string? Error)
+public record CardsGatewayResult(bool IsSuccess, string? CardToken, string? MaskedPan, int? ExpiryMonth, int? ExpiryYear, string? Error)
 {
-    public static CardsGatewayResult Success(string? cardToken, string? maskedPan) => new(true, cardToken, maskedPan, null);
-    public static CardsGatewayResult Failure(string error) => new(false, null, null, error);
+    public static CardsGatewayResult Success(string? cardToken, string? maskedPan, int? expiryMonth, int? expiryYear)
+        => new(true, cardToken, maskedPan, expiryMonth, expiryYear, null);
+    public static CardsGatewayResult Failure(string error) => new(false, null, null, null, null, error);
 }
 
 public record CardGatewayStatus(
