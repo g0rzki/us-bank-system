@@ -29,6 +29,13 @@ public class CaptureController(AppDbContext db, ILogger<CaptureController> logge
             return BadRequest(new { error = "Amount must be greater than zero" });
         }
 
+        if (request.Currency is not null && request.Currency != "USD")
+        {
+            logger.LogWarning("Capture: unsupported currency {Currency} for tx {TransactionId}",
+                request.Currency, request.TransactionId);
+            return BadRequest(new { error = $"Unsupported currency '{request.Currency}'" });
+        }
+
         logger.LogInformation(
             "Card settlement capture received: txId={TransactionId} authCode={AuthCode} amount={Amount} token={CardToken}",
             request.TransactionId, request.AuthorizationCode, request.Amount, request.CardToken);
@@ -66,6 +73,7 @@ public class CaptureController(AppDbContext db, ILogger<CaptureController> logge
         };
 
         db.Transactions.Add(transaction);
+        card.Account.Balance -= transaction.Amount;
         await db.SaveChangesAsync();
 
         logger.LogInformation(

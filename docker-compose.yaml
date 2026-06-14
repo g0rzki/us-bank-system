@@ -17,13 +17,15 @@ services:
     build:
       context: .
       dockerfile: src/UsBankSystem.Api/Dockerfile
-    # Serwis dostępny pod nazwą 'us-bank-a' w sieci cards-frontend —
+    # Serwis dostępny pod nazwą 'us-bank-a' w sieci cards-backend —
     # card-provider oddzwania na http://us-bank-a:8000/capture przy settlement.
+    # ASPNETCORE_URLS dodaje port 8000 (domyślny obraz aspnet:8.0 słucha tylko na 8080).
     container_name: us-bank-a
     ports:
       - "5100:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080;http://+:8000
       - ConnectionStrings__Default=Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       - Jwt__Secret=${JWT_SECRET}
       - Webhook__Secret=${WEBHOOK_SECRET}
@@ -44,7 +46,7 @@ services:
         condition: service_started
     networks:
       - default
-      - cards-frontend
+      - cards-backend
     restart: unless-stopped
 
   frontend:
@@ -80,7 +82,8 @@ volumes:
   pgdata:
 
 networks:
-  cards-frontend:
-    # Zewnętrzna sieć zdefiniowana w docker-compose.yaml Karty-Platnicze-Aplikacje-Biznesowe.
+  cards-backend:
+    # Zewnętrzna sieć z jawnym name: cards-backend w Karty-Platnicze-Aplikacje-Biznesowe.
+    # Hostuje card-provider (/capture) i payment-gateway (Integrations__CardsUrl).
     # Uruchom tamten projekt pierwszy: docker compose -p karty up -d
     external: true

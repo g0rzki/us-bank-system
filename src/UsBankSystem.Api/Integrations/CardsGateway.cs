@@ -189,7 +189,7 @@ public class CardsGateway(HttpClient httpClient, IConfiguration configuration, I
         request.Headers.Add("X-Signature", signature);
         request.Headers.Add("X-Timestamp", timestamp);
         // Musi być identyczny JSON jak użyty do podpisu — sortowane klucze, bez spacji
-        var sortedBody = body.OrderBy(kv => kv.Key).ToDictionary(kv => kv.Key, kv => kv.Value);
+        var sortedBody = body.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToDictionary(kv => kv.Key, kv => kv.Value);
         request.Content = new StringContent(JsonSerializer.Serialize(sortedBody, SignJsonOptions), Encoding.UTF8, "application/json");
         return await httpClient.SendAsync(request, cancellationToken);
     }
@@ -198,7 +198,7 @@ public class CardsGateway(HttpClient httpClient, IConfiguration configuration, I
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
         // Identyczne z payment-gateway: sort_keys=True, separators=(',',':')
-        var sortedBody = body.OrderBy(kv => kv.Key).ToDictionary(kv => kv.Key, kv => kv.Value);
+        var sortedBody = body.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToDictionary(kv => kv.Key, kv => kv.Value);
         var bodyJson = JsonSerializer.Serialize(sortedBody, SignJsonOptions);
         var payload = timestamp + bodyJson;
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(HmacSecret));
