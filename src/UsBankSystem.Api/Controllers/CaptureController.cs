@@ -73,7 +73,8 @@ public class CaptureController(AppDbContext db, ILogger<CaptureController> logge
         };
 
         db.Transactions.Add(transaction);
-        card.Account.Balance -= transaction.Amount;
+        if (card.Type == CardType.Debit)
+            card.Account.Balance -= transaction.Amount;
         await db.SaveChangesAsync();
 
         logger.LogInformation(
