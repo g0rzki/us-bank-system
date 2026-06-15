@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
@@ -70,6 +71,30 @@ public class CardsController(CardService cardService) : ControllerBase
     {
         var userId = UserId();
         return Ok(await cardService.UpdateCardLimitsAsync(userId, accountId, cardId, request));
+    }
+
+    [HttpGet("{cardId:guid}/external-status")]
+    [ProducesResponseType(typeof(CardGatewayStatus), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetExternalStatus(Guid accountId, Guid cardId)
+    {
+        var userId = UserId();
+        var status = await cardService.GetExternalCardStatusAsync(userId, accountId, cardId);
+        return status is null ? NoContent() : Ok(status);
+    }
+
+    [HttpPost("{cardId:guid}/topup")]
+    [ProducesResponseType(typeof(CardResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> TopUpCard(Guid accountId, Guid cardId, [FromBody] TopUpCardRequest request)
+    {
+        var userId = UserId();
+        return Ok(await cardService.TopUpCardAsync(userId, accountId, cardId, request));
     }
 
     private Guid UserId() =>

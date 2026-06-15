@@ -43,6 +43,7 @@ export default function CardsSection({ accountId, isJunior = false }: { accountI
     const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
     const [form, setForm] = useState<FormState>({ type: isJunior ? 'prepaid' : 'debit', dailyLimit: '', monthlyLimit: '' });
+
     const [submitting, setSubmitting] = useState(false);
     const [selectedCard, setSelectedCard] = useState<Card | null>(null);
 
@@ -54,6 +55,11 @@ export default function CardsSection({ accountId, isJunior = false }: { accountI
             .finally(() => setLoading(false));
     }, [accountId]);
 
+    // isJunior może zmienić się asynchronicznie po załadowaniu tabs — resetujemy typ
+    useEffect(() => {
+        setForm(prev => ({ ...prev, type: isJunior ? 'prepaid' : prev.type }));
+    }, [isJunior]);
+
     const handleSubmit = async () => {
         const d = form.dailyLimit ? parseFloat(form.dailyLimit) : null;
         const m = form.monthlyLimit ? parseFloat(form.monthlyLimit) : null;
@@ -64,14 +70,14 @@ export default function CardsSection({ accountId, isJunior = false }: { accountI
         setSubmitting(true);
         try {
             const card = await registerCard(accountId, {
-                type: form.type,
+                type: isJunior ? 'prepaid' : form.type,
                 dailyLimit: form.dailyLimit ? parseFloat(form.dailyLimit) : undefined,
                 monthlyLimit: form.monthlyLimit ? parseFloat(form.monthlyLimit) : undefined,
             });
             setCards(prev => [card, ...prev]);
             setShowForm(false);
             setForm({ type: isJunior ? 'prepaid' : 'debit', dailyLimit: '', monthlyLimit: '' });
-            showToast('Card registered successfully');
+            showToast('Card registered successfully', 'success');
         } catch (e: any) {
             showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to register card');
         } finally {
@@ -85,8 +91,10 @@ export default function CardsSection({ accountId, isJunior = false }: { accountI
             setForm(prev => ({ ...prev, [key]: e.target.value })),
     });
 
-    const hasActiveCard = isJunior && cards.some(c => c.status !== 'expired');
-    const canAddCard = !loading && !hasActiveCard;
+    const hasActiveDebit = cards.some(c => c.type === 'debit' && c.status !== 'expired');
+    const hasActivePrepaid = cards.some(c => c.type === 'prepaid' && c.status !== 'expired');
+    const availableTypes = CARD_TYPES.filter(t => t === 'debit' ? !hasActiveDebit : !hasActivePrepaid);
+    const canAddCard = !loading && (isJunior ? !cards.some(c => c.status !== 'expired') : availableTypes.length > 0);
 
     return (
         <div className="db-section db-mt">
@@ -96,7 +104,7 @@ export default function CardsSection({ accountId, isJunior = false }: { accountI
                     <button
                         className="db-btn-secondary"
                         style={{ fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: 4 }}
-                        onClick={() => setShowForm(true)}
+                        onClick={() => { setForm(prev => ({ ...prev, type: availableTypes[0] ?? 'debit' })); setShowForm(true); }}
                     >
                         <Plus size={14} /> Add card
                     </button>
@@ -111,7 +119,7 @@ export default function CardsSection({ accountId, isJunior = false }: { accountI
                             <div className="db-form-field">
                                 <span className="db-label">Card type</span>
                                 <select className="db-input" {...field('type')}>
-                                    {CARD_TYPES.map(t => (
+                                    {availableTypes.map(t => (
                                         <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
                                     ))}
                                 </select>

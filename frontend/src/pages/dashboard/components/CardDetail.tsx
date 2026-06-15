@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { X } from 'lucide-react';
-import { updateCardStatus, updateCardLimits } from '../../../api/accounts';
+import { useState, useEffect } from 'react';
+import { X, Copy, Check } from 'lucide-react';
+import { getCard, updateCardStatus, updateCardLimits, topUpCard, getCardExternalStatus } from '../../../api/accounts';
+import type { CardExternalStatus } from '../../../api/accounts';
 import type { Card } from '../../../api/accounts';
 import { useToast } from '../../../context/ToastContext';
 
@@ -29,10 +30,61 @@ export default function CardDetail({ card: initial, accountId, canEditLimits = t
     const { showToast } = useToast();
     const [card, setCard] = useState(initial);
     const [loading, setLoading] = useState(false);
+    const [tokenCopied, setTokenCopied] = useState(false);
+    const [toppingUp, setToppingUp] = useState(false);
+    const [topUpAmount, setTopUpAmount] = useState('');
+    const [topUpLoading, setTopUpLoading] = useState(false);
+    const [externalStatus, setExternalStatus] = useState<CardExternalStatus | null>(null);
+
+    const fetchExternalStatus = () => {
+        if (card.type === 'prepaid') {
+            getCardExternalStatus(accountId, card.id)
+                .then(s => setExternalStatus(s))
+                .catch(() => {});
+        }
+    };
+
+    // Przy otwarciu odpytaj backend — dostaniemy zsynchronizowany status z payment-gateway
+    useEffect(() => {
+        getCard(accountId, initial.id)
+            .then(fresh => { setCard(fresh); onUpdated(fresh); })
+            .catch(() => {}); // cicho — pokazujemy dane z listy jako fallback
+        fetchExternalStatus();
+    }, []);
     const [editingLimits, setEditingLimits] = useState(false);
     const [dailyLimit, setDailyLimit] = useState('');
     const [monthlyLimit, setMonthlyLimit] = useState('');
     const [limitsLoading, setLimitsLoading] = useState(false);
+
+    const copyToken = () => {
+        if (!card.externalCardToken) return;
+        navigator.clipboard.writeText(card.externalCardToken).then(() => {
+            setTokenCopied(true);
+            setTimeout(() => setTokenCopied(false), 2000);
+        });
+    };
+
+    const handleTopUp = async () => {
+        const amount = parseFloat(topUpAmount);
+        if (!topUpAmount || isNaN(amount) || amount <= 0) {
+            showToast('Enter a valid amount');
+            return;
+        }
+        setTopUpLoading(true);
+        try {
+            const updated = await topUpCard(accountId, card.id, amount);
+            setCard(updated);
+            onUpdated(updated);
+            setToppingUp(false);
+            setTopUpAmount('');
+            showToast(`$${amount.toFixed(2)} added to card`, 'success');
+            fetchExternalStatus();
+        } catch (e: any) {
+            showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Top-up failed');
+        } finally {
+            setTopUpLoading(false);
+        }
+    };
 
     const cooldown = card.status === 'blocked' && card.blockedAt ? formatCooldown(card.blockedAt) : null;
     const canUnblock = card.status === 'blocked' && cooldown === null;
@@ -44,7 +96,7 @@ export default function CardDetail({ card: initial, accountId, canEditLimits = t
             const updated = await updateCardStatus(accountId, card.id, toggleStatus);
             setCard(updated);
             onUpdated(updated);
-            showToast(`Card ${toggleStatus === 'blocked' ? 'blocked' : 'unblocked'} successfully`);
+            showToast(`Card ${toggleStatus === 'blocked' ? 'blocked' : 'unblocked'} successfully`, 'success');
         } catch (e: any) {
             showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to update card status');
         } finally {
@@ -76,7 +128,7 @@ export default function CardDetail({ card: initial, accountId, canEditLimits = t
             setEditingLimits(false);
             setDailyLimit('');
             setMonthlyLimit('');
-            showToast('Limits updated');
+            showToast('Limits updated', 'success');
         } catch (e: any) {
             showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to update limits');
         } finally {
@@ -85,7 +137,7 @@ export default function CardDetail({ card: initial, accountId, canEditLimits = t
     };
 
     const rows = [
-        { label: 'Number', value: `•••• •••• •••• ${card.last4}` },
+        { label: 'Number', value: card.maskedPan ?? `•••• •••• •••• ${card.last4}` },
         { label: 'Type', value: card.type.charAt(0).toUpperCase() + card.type.slice(1) },
         { label: 'Status', value: STATUS_LABELS[card.status] ?? card.status },
         { label: 'Expires', value: new Date(card.expiresAt).toLocaleDateString('en-US', { month: '2-digit', year: 'numeric' }) },
@@ -124,6 +176,33 @@ export default function CardDetail({ card: initial, accountId, canEditLimits = t
                             {card.monthlyLimit != null ? `$${card.monthlyLimit.toFixed(2)}` : 'No limit'}
                         </span>
                     </div>
+
+                    {externalStatus?.balance != null && (
+                        <div className="db-account-popup-row">
+                            <span className="db-account-popup-label">Balance</span>
+                            <span className="db-account-popup-value" style={{ fontWeight: 600 }}>
+                                ${externalStatus.balance.toFixed(2)}
+                            </span>
+                        </div>
+                    )}
+
+                    {card.externalCardToken && (
+                        <div className="db-account-popup-row">
+                            <span className="db-account-popup-label">Payment token</span>
+                            <span className="db-account-popup-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontFamily: 'monospace', fontSize: '0.8em', wordBreak: 'break-all' }}>
+                                    {card.externalCardToken}
+                                </span>
+                                <button
+                                    onClick={copyToken}
+                                    title="Copy token"
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: tokenCopied ? 'var(--color-success, #22c55e)' : 'var(--color-text-muted)', padding: 2, flexShrink: 0 }}
+                                >
+                                    {tokenCopied ? <Check size={14} /> : <Copy size={14} />}
+                                </button>
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {canEditLimits && card.status !== 'expired' && (
@@ -161,6 +240,36 @@ export default function CardDetail({ card: initial, accountId, canEditLimits = t
                     ) : (
                         <button className="db-btn-secondary" style={{ fontSize: '0.875rem', marginTop: 8 }} onClick={() => setEditingLimits(true)}>
                             Edit limits
+                        </button>
+                    )
+                )}
+
+                {card.type === 'prepaid' && card.status === 'active' && (
+                    toppingUp ? (
+                        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div className="db-form-field">
+                                <span className="db-label">Amount to add ($1–$10,000)</span>
+                                <input
+                                    className="db-input"
+                                    type="number" min="1" max="10000" step="1"
+                                    placeholder="e.g. 50"
+                                    value={topUpAmount}
+                                    onChange={e => setTopUpAmount(e.target.value)}
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="db-form-actions">
+                                <button className="db-btn-secondary" onClick={() => { setToppingUp(false); setTopUpAmount(''); }} disabled={topUpLoading}>
+                                    Cancel
+                                </button>
+                                <button className="db-btn-primary" onClick={handleTopUp} disabled={topUpLoading}>
+                                    {topUpLoading ? 'Processing…' : 'Top up'}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <button className="db-btn-secondary" style={{ fontSize: '0.875rem', marginTop: 8 }} onClick={() => setToppingUp(true)}>
+                            + Top up card
                         </button>
                     )
                 )}
