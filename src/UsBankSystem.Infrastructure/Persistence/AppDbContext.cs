@@ -13,7 +13,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<BlikCode> BlikCodes => Set<BlikCode>();
     public DbSet<BlikAuthorization> BlikAuthorizations => Set<BlikAuthorization>();
     public DbSet<JuniorAccount> JuniorAccounts => Set<JuniorAccount>();
-    
+    public DbSet<PhoneAlias> PhoneAliases => Set<PhoneAlias>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -128,6 +129,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(j => j.AccountId).IsUnique();
             e.HasIndex(j => j.ParentUserId);
+        });
+
+        modelBuilder.Entity<PhoneAlias>(e =>
+        {
+            e.HasKey(p => p.Id);
+            e.Property(p => p.Phone).IsRequired().HasMaxLength(20);
+            e.Property(p => p.KlikAliasId).IsRequired().HasMaxLength(100);
+            e.Property(p => p.Status).IsRequired().HasMaxLength(10).HasDefaultValue("active");
+            e.HasOne(p => p.Account)
+             .WithMany()
+             .HasForeignKey(p => p.AccountId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(p => new { p.Phone, p.Status });
+            e.HasIndex(p => p.AccountId);
         });
     }
 }
