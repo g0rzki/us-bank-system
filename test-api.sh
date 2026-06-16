@@ -1,0 +1,1176 @@
+#!/usr/bin/env bash
+# test-api.sh — komprehensywny test wszystkich endpointów us-bank-system
+# Wymaga: curl, python3 (lub python)
+# Użycie: bash test-api.sh [BASE_URL] [WEBHOOK_SECRET]
+
+set -uo pipefail
+BASE_URL="${1:-${API_URL:-http://localhost:5100}}"
+WEBHOOK_SECRET="${2:-${WEBHOOK_SECRET:-dev_webhook_secret}}"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+PASS=0; FAIL=0; SKIP=0
+
+# ─── Helpery ─────────────────────────────────────────────────────────────────
+
+section() { echo -e "\n${BLUE}${BOLD}━━━━━━  $1  ━━━━━━${NC}"; }
+ok()   { echo -e "  ${GREEN}✓${NC} $1"; PASS=$((PASS+1)); }
+fail() { echo -e "  ${RED}✗${NC} $1"; [ -n "${2:-}" ] && echo -e "    ${YELLOW}↳ $(echo "$2" | head -c 200)${NC}"; FAIL=$((FAIL+1)); }
+skip() { echo -e "  ${YELLOW}⊘${NC} $1 (pominięto: $2)"; SKIP=$((SKIP+1)); }
+info() { echo -e "  ${CYAN}·${NC} $1"; }
+
+check() {
+  local desc="$1" expected="$2" actual="$3" body="${4:-}"
+  if [ "$actual" = "$expected" ]; then
+    ok "$desc (HTTP $actual)"
+  else
+    fail "$desc — oczekiwano HTTP $expected, dostano $actual" "$body"
+  fi
+}
+
+check_any() {
+  local desc="$1" expected="$2" actual="$3" body="${4:-}"
+  if echo "$expected" | grep -qw "$actual"; then
+    ok "$desc (HTTP $actual)"
+  else
+    fail "$desc — oczekiwano HTTP $expected, dostano $actual" "$body"
+  fi
+}
+
+req() {
+  local method="$1" path="$2"; shift 2
+  local tmp; tmp=$(mktemp)
+  local status
+  status=$(curl -s -o "$tmp" -w "%{http_code}" -X "$method" \
+    -H "Content-Type: application/json" "$@" \
+    "${BASE_URL}${path}" 2>/dev/null) || status="000"
+  local body; body=$(cat "$tmp"); rm -f "$tmp"
+  printf '%s|%s' "$status" "$body"
+}
+
+status() { echo "${1%%|*}"; }
+body()   { echo "${1#*|}"; }
+
+if command -v python3 &>/dev/null; then PY=python3
+elif command -v python &>/dev/null; then PY=python
+else PY=""; fi
+
+jget() {
+  local json="$1" expr="$2"
+  [ -z "$PY" ] && { echo ""; return; }
+  case "$expr" in
+    'length') printf '%s' "$json" | $PY -c "import sys,json; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0" ;;
+    *) local key="${expr#.}"
+       printf '%s' "$json" | $PY -c "import sys,json; d=json.load(sys.stdin); v=d.get('$key',''); print('' if v is None else v)" 2>/dev/null || echo "" ;;
+  esac
+}
+
+# ─── Środowisko ──────────────────────────────────────────────────────────────
+
+echo -e "${BOLD}us-bank-system API Test${NC}"
+echo -e "URL: ${CYAN}${BASE_URL}${NC}"
+echo ""
+
+if ! command -v curl &>/dev/null; then echo -e "${RED}BŁĄD: curl nie jest zainstalowane.${NC}"; exit 1; fi
+[ -z "$PY" ] && echo -e "${YELLOW}UWAGA: brak python3/python — niektóre funkcje ograniczone${NC}"
+
+R=$(req GET /health)
+if [ "$(status "$R")" != "200" ]; then echo -e "${RED}API nie odpowiada pod ${BASE_URL}${NC}"; exit 1; fi
+echo -e "${GREEN}API działa${NC}"
+
+# Adresy integracji (z env lub z domyślnych)
+ACH_URL="${INTEGRATIONS_ACH_URL:-http://localhost:8310}"
+CARDS_URL="${INTEGRATIONS_CARDS_URL:-http://localhost:8072}"
+RTP_URL="${INTEGRATIONS_RTP_URL:-http://localhost:6002}"
+FEDNOW_URL="${INTEGRATIONS_FEDNOW_URL:-http://localhost:6003}"
+SWIFT_URL="${INTEGRATIONS_SWIFT_URL:-http://localhost:6004}"
+SFTP_HOST="${Ach__Sftp__Host:-localhost}"
+SFTP_PORT="${Ach__Sftp__Port:-2221}"
+
+# ─── Stałe seededowe ID ──────────────────────────────────────────────────────
+
+JOHN_CHECKING="aaaa1111-1111-1111-1111-111111111111"
+JOHN_SAVINGS="aaaa1111-2222-2222-2222-222222222222"
+JANE_CHECKING="bbbb2222-1111-1111-1111-111111111111"
+BOB_CHECKING="cccc3333-1111-1111-1111-111111111111"
+
+JOHN_CHECKING_NUM="1000000001"
+JOHN_SAVINGS_NUM="1000000002"
+JANE_CHECKING_NUM="2000000001"
+BOB_CHECKING_NUM="3000000001"
+
+JUNIOR_ACC_1="dddd4444-1111-1111-1111-111111111111"
+
+TR_COMPLETED="bbbb0001-0000-0000-0000-000000000001"
+TR_ACH_PENDING="bbbb0001-0000-0000-0000-000000000007"
+TR_SWIFT_PENDING="bbbb0001-0000-0000-0000-000000000008"
+
+TOKEN_JOHN=""; TOKEN_JANE=""; TOKEN_BOB=""; TOKEN_EMMA=""
+TOKEN_TEST=""
+TEST_ACCOUNT_ID=""; TEST_ACCOUNT_NUM=""
+TEST_CARD_DEBIT_ID=""; TEST_CARD_PREPAID_ID=""
+ACH_TR_ID=""; NEW_JUNIOR_ID=""
+ACH_HELPER_UP=false; SFTP_UP=false; CARDS_GW_UP=false
+
+TS=$(date +%s)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "1 · HEALTH"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req GET /health)
+check "GET /health" 200 "$(status "$R")" "$(body "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "2 · CONNECTIVITY — zewnętrzne integracje"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Sprawdź czy HTTP endpoint odpowiada (dowolny kod != 000 = UP)
+http_up() {
+  local url="$1"
+  local code
+  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 5 "${url}" 2>/dev/null) || code="000"
+  [ "$code" != "000" ]
+}
+
+# Sprawdź port TCP przez Python socket
+port_open() {
+  local host="$1" port="$2"
+  [ -n "$PY" ] || return 1
+  $PY -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(3)
+try:
+    s.connect(('$host', $port))
+    s.close()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+# --- ACH Helper ---
+info "ACH Helper: ${ACH_URL}"
+if http_up "${ACH_URL}"; then
+  ok "ACH Helper — port/HTTP dostępny"
+  ACH_HELPER_UP=true
+
+  # Bezpośredni test POST /json-to-ach — struktura z AchGateway.cs
+  TOMORROW_DATE=$($PY -c "from datetime import date,timedelta; print((date.today()+timedelta(days=1)).strftime('%y%m%d'))" 2>/dev/null || echo "260616")
+  ACH_TEST_PAYLOAD="{\"data\":{\"header\":{\"immediate_destination\":\"090000515\",\"immediate_origin\":\"110000000\",\"immediate_destination_name\":\"FRB Tungsten\",\"immediate_origin_name\":\"US Bank A\",\"file_id_modifier\":\"T\"},\"batches\":[{\"header\":{\"company_name\":\"US Bank A\",\"company_identification\":\"110000000\",\"standard_entry_class_code\":\"PPD\",\"company_entry_description\":\"TRANSFER\",\"effective_entry_date\":\"${TOMORROW_DATE}\",\"originating_dfi_identification\":\"11000000\"},\"entries\":[{\"transaction_code\":\"22\",\"receiving_dfi_rtn\":\"021000021\",\"dfi_account_number\":\"987654321\",\"amount_cents\":100,\"individual_name\":\"CONN TEST\",\"trace_number\":\"110000000000001\"}]}]}}"
+  ACH_TMP=$(mktemp)
+  ACH_CODE=$(curl -s -o "$ACH_TMP" -w "%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    -d "${ACH_TEST_PAYLOAD}" \
+    "${ACH_URL}/json-to-ach" --connect-timeout 5 --max-time 10 2>/dev/null) || ACH_CODE="000"
+  ACH_BODY=$(cat "$ACH_TMP"); rm -f "$ACH_TMP"
+
+  if [ "$ACH_CODE" = "200" ]; then
+    ok "ACH Helper POST /json-to-ach → 200 (NACHA wygenerowany)"
+    # Pierwsza linia pliku NACHA zaczyna się od '1' (File Header Record)
+    FIRST_CHAR=$(printf '%s' "$ACH_BODY" | head -c 1)
+    if [ "$FIRST_CHAR" = "1" ]; then
+      ok "ACH Helper — odpowiedź to poprawny plik NACHA (zaczyna się od '1')"
+    else
+      fail "ACH Helper — odpowiedź nie wygląda jak plik NACHA" "${ACH_BODY:0:100}"
+    fi
+  else
+    fail "ACH Helper POST /json-to-ach — oczekiwano 200, dostano ${ACH_CODE}" "${ACH_BODY:0:200}"
+  fi
+
+  # Błędny payload → powinno zwrócić błąd (nie 200)
+  ACH_TMP2=$(mktemp)
+  ACH_BAD=$(curl -s -o "$ACH_TMP2" -w "%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    -d '{"data":{}}' \
+    "${ACH_URL}/json-to-ach" --connect-timeout 5 --max-time 10 2>/dev/null) || ACH_BAD="000"
+  ACH_BAD_BODY=$(cat "$ACH_TMP2"); rm -f "$ACH_TMP2"
+  if [ "$ACH_BAD" != "200" ] && [ "$ACH_BAD" != "000" ]; then
+    ok "ACH Helper /json-to-ach — błędny payload → HTTP ${ACH_BAD} (walidacja działa)"
+  elif [ "$ACH_BAD" = "000" ]; then
+    fail "ACH Helper — brak odpowiedzi na błędny payload"
+  else
+    fail "ACH Helper — błędny payload zwrócił 200 (brak walidacji?)" "${ACH_BAD_BODY:0:100}"
+  fi
+else
+  fail "ACH Helper (${ACH_URL}) — NIEDOSTĘPNY (brak połączenia)"
+  skip "ACH Helper POST /json-to-ach — poprawny payload" "serwis niedostępny"
+  skip "ACH Helper POST /json-to-ach — błędny payload" "serwis niedostępny"
+fi
+
+# --- SFTP ---
+info "SFTP: ${SFTP_HOST}:${SFTP_PORT}"
+if port_open "${SFTP_HOST}" "${SFTP_PORT}"; then
+  ok "SFTP (${SFTP_HOST}:${SFTP_PORT}) — port otwarty"
+  SFTP_UP=true
+else
+  fail "SFTP (${SFTP_HOST}:${SFTP_PORT}) — port niedostępny"
+fi
+
+# --- Cards Gateway ---
+info "Cards Gateway: ${CARDS_URL}"
+if http_up "${CARDS_URL}"; then
+  ok "Cards Gateway (${CARDS_URL}) — dostępny"
+  CARDS_GW_UP=true
+else
+  fail "Cards Gateway (${CARDS_URL}) — NIEDOSTĘPNY"
+fi
+
+# --- Pozostałe gateways ---
+for entry in "RTP|${RTP_URL}" "FedNow|${FEDNOW_URL}" "SWIFT|${SWIFT_URL}"; do
+  GW_NAME="${entry%%|*}"
+  GW_URL="${entry#*|}"
+  info "Gateway ${GW_NAME}: ${GW_URL}"
+  if http_up "${GW_URL}"; then
+    ok "Gateway ${GW_NAME} (${GW_URL}) — dostępny"
+  else
+    fail "Gateway ${GW_NAME} (${GW_URL}) — NIEDOSTĘPNY"
+  fi
+done
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "3 · AUTH — register"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+NEW_EMAIL="test.user.${TS}@example.com"
+
+R=$(req POST /auth/register -d "{\"email\":\"${NEW_EMAIL}\",\"password\":\"SecurePass1!\",\"firstName\":\"Test\",\"lastName\":\"User\"}")
+check "POST /auth/register — nowy użytkownik → 201" 201 "$(status "$R")" "$(body "$R")"
+
+R=$(req POST /auth/register -d "{\"email\":\"${NEW_EMAIL}\",\"password\":\"SecurePass1!\",\"firstName\":\"Test\",\"lastName\":\"User\"}")
+check "POST /auth/register — duplikat email → 409" 409 "$(status "$R")"
+
+R=$(req POST /auth/register -d "{\"password\":\"SecurePass1!\",\"firstName\":\"Test\",\"lastName\":\"User\"}")
+check "POST /auth/register — brak email → 400" 400 "$(status "$R")"
+
+R=$(req POST /auth/register -d "{\"email\":\"shortpw.${TS}@example.com\",\"password\":\"short\",\"firstName\":\"Test\",\"lastName\":\"User\"}")
+check "POST /auth/register — hasło < 8 znaków → 400" 400 "$(status "$R")"
+
+R=$(req POST /auth/register -d "{\"email\":\"notanemail\",\"password\":\"SecurePass1!\",\"firstName\":\"Test\",\"lastName\":\"User\"}")
+check "POST /auth/register — zły format email → 400" 400 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "4 · AUTH — login"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req POST /auth/login -d '{"email":"john.doe@example.com","password":"Test123!"}')
+check "POST /auth/login — john.doe → 200" 200 "$(status "$R")"
+TOKEN_JOHN=$(jget "$(body "$R")" '.token')
+
+R=$(req POST /auth/login -d '{"email":"jane.smith@example.com","password":"Test123!"}')
+check "POST /auth/login — jane.smith → 200" 200 "$(status "$R")"
+TOKEN_JANE=$(jget "$(body "$R")" '.token')
+
+R=$(req POST /auth/login -d '{"email":"bob.wilson@example.com","password":"Test123!"}')
+check "POST /auth/login — bob.wilson → 200" 200 "$(status "$R")"
+TOKEN_BOB=$(jget "$(body "$R")" '.token')
+
+R=$(req POST /auth/login -d '{"email":"emma.doe@example.com","password":"Test123!"}')
+check "POST /auth/login — emma.doe (junior) → 200" 200 "$(status "$R")"
+TOKEN_EMMA=$(jget "$(body "$R")" '.token')
+
+R=$(req POST /auth/login -d "{\"email\":\"${NEW_EMAIL}\",\"password\":\"SecurePass1!\"}")
+check "POST /auth/login — nowy user z rejestracji → 200" 200 "$(status "$R")"
+TOKEN_TEST=$(jget "$(body "$R")" '.token')
+
+R=$(req POST /auth/login -d '{"email":"john.doe@example.com","password":"WrongPassword1"}')
+check "POST /auth/login — złe hasło → 401" 401 "$(status "$R")"
+
+R=$(req POST /auth/login -d '{"email":"nobody@example.com","password":"Test123!"}')
+check "POST /auth/login — nieznany email → 401" 401 "$(status "$R")"
+
+R=$(req POST /auth/login -d '{"email":"john.doe@example.com"}')
+check "POST /auth/login — brak hasła → 400" 400 "$(status "$R")"
+
+R=$(req POST /auth/login -d '{}')
+check "POST /auth/login — puste ciało → 400" 400 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "5 · AUTH — me"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req GET /auth/me -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /auth/me — poprawny token → 200" 200 "$(status "$R")"
+
+R=$(req GET /auth/me)
+check "GET /auth/me — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req GET /auth/me -H "Authorization: Bearer invalid.token.here")
+check "GET /auth/me — niepoprawny token → 401" 401 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "6 · SETUP — konto testowego użytkownika"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req POST /accounts -H "Authorization: Bearer ${TOKEN_TEST}" \
+  -d '{"type":"checking","currency":"USD"}')
+check "POST /accounts — test user checking → 201" 201 "$(status "$R")" "$(body "$R")"
+TEST_ACCOUNT_ID=$(jget "$(body "$R")" '.id')
+TEST_ACCOUNT_NUM=$(jget "$(body "$R")" '.accountNumber')
+info "Test account ID: ${TEST_ACCOUNT_ID}"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "7 · ACCOUNTS — list & create"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req GET /accounts -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts — john → 200" 200 "$(status "$R")"
+info "Konta john: $(jget "$(body "$R")" 'length')"
+
+R=$(req GET /accounts)
+check "GET /accounts — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req POST /accounts -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"type":"savings","currency":"USD"}')
+check "POST /accounts — test user savings → 201" 201 "$(status "$R")"
+
+R=$(req POST /accounts -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"type":"checking","currency":"USD"}')
+check "POST /accounts — test user checking #2 → 201" 201 "$(status "$R")"
+
+R=$(req POST /accounts -H "Authorization: Bearer ${TOKEN_BOB}" -d '{"type":"investment"}')
+check "POST /accounts — typ 'investment' → 400" 400 "$(status "$R")"
+
+R=$(req POST /accounts -H "Authorization: Bearer ${TOKEN_BOB}" -d '{}')
+check "POST /accounts — brak type → 400" 400 "$(status "$R")"
+
+R=$(req POST /accounts)
+check "POST /accounts — brak tokenu → 401" 401 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "8 · ACCOUNTS — get / balance / transactions"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req GET "/accounts/${JOHN_CHECKING}" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id} — własne → 200" 200 "$(status "$R")"
+
+R=$(req GET "/accounts/${JANE_CHECKING}" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id} — cudze → 401" 401 "$(status "$R")"
+
+R=$(req GET "/accounts/00000000-0000-0000-0000-000000000000" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id} — nie istnieje → 404" 404 "$(status "$R")"
+
+R=$(req GET "/accounts/${JOHN_CHECKING}")
+check "GET /accounts/{id} — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req GET "/accounts/${JOHN_CHECKING}/balance" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id}/balance — własne → 200" 200 "$(status "$R")"
+info "Saldo john checking: \$$(jget "$(body "$R")" '.balance')"
+
+R=$(req GET "/accounts/${JANE_CHECKING}/balance" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id}/balance — cudze → 401" 401 "$(status "$R")"
+
+R=$(req GET "/accounts/00000000-0000-0000-0000-000000000000/balance" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id}/balance — nie istnieje → 404" 404 "$(status "$R")"
+
+R=$(req GET "/accounts/${JOHN_CHECKING}/transactions" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id}/transactions — strona 1 → 200" 200 "$(status "$R")"
+info "Transakcji john checking: $(jget "$(body "$R")" '.total')"
+
+R=$(req GET "/accounts/${JOHN_CHECKING}/transactions?page=2&pageSize=5" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id}/transactions — page=2, pageSize=5 → 200" 200 "$(status "$R")"
+
+R=$(req GET "/accounts/${JANE_CHECKING}/transactions" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id}/transactions — cudze → 401" 401 "$(status "$R")"
+
+R=$(req GET "/accounts/${JOHN_CHECKING}/junior-accounts" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /accounts/{id}/junior-accounts — john → 200" 200 "$(status "$R")"
+info "Junior accounts pod john: $(jget "$(body "$R")" 'length')"
+
+R=$(req GET "/accounts/${JOHN_CHECKING}/junior-accounts" -H "Authorization: Bearer ${TOKEN_JANE}")
+check "GET /accounts/{id}/junior-accounts — cudze → 401" 401 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "9 · ACCOUNTS — junior"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+JR_EMAIL="junior.${TS}@example.com"
+R=$(req POST /accounts/junior -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"parentAccountId\":\"${JOHN_CHECKING}\",
+  \"email\":\"${JR_EMAIL}\",
+  \"password\":\"Junior123!\",
+  \"firstName\":\"Junior\",\"lastName\":\"Test\",\"dateOfBirth\":\"2015-06-15\"
+}")
+check "POST /accounts/junior — utwórz → 201" 201 "$(status "$R")" "$(body "$R")"
+NEW_JUNIOR_ID=$(jget "$(body "$R")" '.accountId')
+info "Nowy junior ID: ${NEW_JUNIOR_ID}"
+
+R=$(req POST /accounts/junior -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"parentAccountId\":\"${JOHN_CHECKING}\",
+  \"email\":\"${JR_EMAIL}\",
+  \"password\":\"Junior123!\",
+  \"firstName\":\"Junior\",\"lastName\":\"Test\",\"dateOfBirth\":\"2015-06-15\"
+}")
+check "POST /accounts/junior — duplikat email → 409" 409 "$(status "$R")"
+
+R=$(req POST /accounts/junior -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"parentAccountId\":\"${JANE_CHECKING}\",
+  \"email\":\"jrnoaccess.${TS}@example.com\",
+  \"password\":\"Junior123!\",\"firstName\":\"X\",\"lastName\":\"Y\",\"dateOfBirth\":\"2015-01-01\"
+}")
+check "POST /accounts/junior — cudzy parent → 404" 404 "$(status "$R")"
+
+R=$(req POST /accounts/junior -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"parentAccountId\":\"${JOHN_CHECKING}\",
+  \"email\":\"jrnodob.${TS}@example.com\",
+  \"password\":\"Junior123!\",\"firstName\":\"X\",\"lastName\":\"Y\"
+}")
+check "POST /accounts/junior — brak dateOfBirth → 400" 400 "$(status "$R")"
+
+R=$(req PATCH "/accounts/${JUNIOR_ACC_1}/junior-limit" -H "Authorization: Bearer ${TOKEN_JOHN}" \
+  -d '{"dailyLimit":100.00,"monthlyLimit":500.00}')
+check "PATCH /accounts/{id}/junior-limit — update → 200" 200 "$(status "$R")"
+
+R=$(req PATCH "/accounts/${JUNIOR_ACC_1}/junior-limit" -H "Authorization: Bearer ${TOKEN_JOHN}" \
+  -d '{"dailyLimit":0.001}')
+check "PATCH /accounts/{id}/junior-limit — dailyLimit < 0.01 → 400" 400 "$(status "$R")"
+
+R=$(req PATCH "/accounts/${JUNIOR_ACC_1}/junior-limit" -H "Authorization: Bearer ${TOKEN_JANE}" \
+  -d '{"dailyLimit":50.00}')
+check "PATCH /accounts/{id}/junior-limit — cudzy junior → 401" 401 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "10 · TRANSFERS — list & status"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req GET /transfers -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /transfers — john → 200" 200 "$(status "$R")"
+info "Transfery john: $(jget "$(body "$R")" 'length')"
+
+R=$(req GET /transfers)
+check "GET /transfers — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req GET /transfers/pending-approval -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /transfers/pending-approval — john → 200" 200 "$(status "$R")"
+
+R=$(req GET /transfers/pending-approval -H "Authorization: Bearer ${TOKEN_BOB}")
+check "GET /transfers/pending-approval — bob (brak juniorów) → 200 []" 200 "$(status "$R")"
+
+R=$(req GET "/transfers/${TR_ACH_PENDING}/status" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /transfers/{id}/status — własny → 200" 200 "$(status "$R")"
+
+R=$(req GET "/transfers/${TR_ACH_PENDING}/status" -H "Authorization: Bearer ${TOKEN_JANE}")
+check "GET /transfers/{id}/status — cudzy → 401" 401 "$(status "$R")"
+
+R=$(req GET "/transfers/00000000-0000-0000-0000-000000000000/status" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /transfers/{id}/status — nie istnieje → 404" 404 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "11 · TRANSFERS — internal"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":10.00,\"currency\":\"USD\",\"description\":\"Test\"
+}")
+check "POST /transfers/internal — happy path → 201" 201 "$(status "$R")"
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",\"toAccountId\":\"${JOHN_CHECKING}\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/internal — to samo konto → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":9999999.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/internal — brak środków → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":10.00,\"currency\":\"EUR\"
+}")
+check "POST /transfers/internal — waluta EUR → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":-5.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/internal — ujemna kwota → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":0,\"currency\":\"USD\"
+}")
+check "POST /transfers/internal — kwota = 0 → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"9999999999\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/internal — nieznany numer konta → 404" 404 "$(status "$R")"
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JANE_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/internal — cudze konto źródłowe → 404" 404 "$(status "$R")"
+
+R=$(req POST /transfers/internal -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/internal — brak tokenu → 401" 401 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "12 · TRANSFERS — ACH (pełne pokrycie)"
+# ═══════════════════════════════════════════════════════════════════════════════
+# AchPaymentService: waliduje walutę, saldo, konto źródłowe (→ 400/404 bez gateway).
+# AchGateway: konwertuje do NACHA (POST /json-to-ach) → upload SFTP.
+# Jeśli ACH helper lub SFTP niedostępny → transfer.Status=Failed → API zwraca 400.
+
+if $ACH_HELPER_UP && $SFTP_UP; then
+  info "ACH Helper i SFTP UP — testy happy path oczekują 201"
+  ACH_E2E=true
+else
+  info "ACH Helper=$ACH_HELPER_UP / SFTP=$SFTP_UP — happy path = check_any 201|400"
+  ACH_E2E=false
+fi
+
+# --- Happy path: checking ---
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":50.00,\"currency\":\"USD\",\"description\":\"ACH test\"
+}")
+if $ACH_E2E; then
+  check "POST /transfers/ach — checking → 201" 201 "$(status "$R")" "$(body "$R")"
+else
+  check_any "POST /transfers/ach — checking (e2e off) → 201|400" "201|400" "$(status "$R")" "$(body "$R")"
+fi
+ACH_TR_ID=$(jget "$(body "$R")" '.id')
+info "ACH transfer ID: ${ACH_TR_ID:-brak}"
+
+# --- Happy path: savings ---
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_SAVINGS}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"111222333\",
+  \"amount\":25.00,\"currency\":\"USD\",\"description\":\"ACH savings\"
+}")
+if $ACH_E2E; then
+  check "POST /transfers/ach — savings account → 201" 201 "$(status "$R")"
+else
+  check_any "POST /transfers/ach — savings account → 201|400" "201|400" "$(status "$R")"
+fi
+
+# --- Minimalny amount (0.01) ---
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"111222333\",
+  \"amount\":0.01,\"currency\":\"USD\"
+}")
+if $ACH_E2E; then
+  check "POST /transfers/ach — amount=0.01 (minimum) → 201" 201 "$(status "$R")"
+else
+  check_any "POST /transfers/ach — amount=0.01 → 201|400" "201|400" "$(status "$R")"
+fi
+
+# --- Bez description (opcjonalne) ---
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"555666777\",
+  \"amount\":5.00,\"currency\":\"USD\"
+}")
+if $ACH_E2E; then
+  check "POST /transfers/ach — bez description → 201" 201 "$(status "$R")"
+else
+  check_any "POST /transfers/ach — bez description → 201|400" "201|400" "$(status "$R")"
+fi
+
+# --- Długi description (AchGateway truncuje do 22 znaków w NACHA) ---
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"555666777\",
+  \"amount\":5.00,\"currency\":\"USD\",
+  \"description\":\"Bardzo długi opis przekraczający 22 znaki NACHA\"
+}")
+if $ACH_E2E; then
+  check "POST /transfers/ach — długi description (truncated w NACHA) → 201" 201 "$(status "$R")"
+else
+  check_any "POST /transfers/ach — długi description → 201|400" "201|400" "$(status "$R")"
+fi
+
+# --- Junior tworzy ACH → pending_approval (nie idzie do SFTP, zawsze 201) ---
+if [ -n "$TOKEN_EMMA" ]; then
+  R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_EMMA}" -d "{
+    \"fromAccountId\":\"${JUNIOR_ACC_1}\",
+    \"toRoutingNumber\":\"021000021\",
+    \"toAccountNumber\":\"987654321\",
+    \"amount\":1.00,\"currency\":\"USD\",\"description\":\"Junior ACH\"
+  }")
+  check "POST /transfers/ach — junior → pending_approval (201, bez SFTP)" 201 "$(status "$R")" "$(body "$R")"
+  info "Junior ACH status: $(jget "$(body "$R")" '.status')"
+else
+  skip "POST /transfers/ach — junior pending_approval" "brak TOKEN_EMMA"
+fi
+
+# === Walidacje pól (zawsze 400, bez gateway) ===
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":50.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/ach — brak toRoutingNumber → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"amount\":50.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/ach — brak toAccountNumber → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":50.00,\"currency\":\"USD\"
+}")
+check_any "POST /transfers/ach — brak fromAccountId → 400 lub 404" "400|404" "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"currency\":\"USD\"
+}")
+check "POST /transfers/ach — brak amount → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":0,\"currency\":\"USD\"
+}")
+check "POST /transfers/ach — amount = 0 → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":-10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/ach — ujemna kwota → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":0.001,\"currency\":\"USD\"
+}")
+check "POST /transfers/ach — amount=0.001 (poniżej minimum) → 400" 400 "$(status "$R")"
+
+# === Walidacja waluty ===
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":50.00,\"currency\":\"GBP\"
+}")
+check "POST /transfers/ach — waluta GBP → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":50.00,\"currency\":\"EUR\"
+}")
+check "POST /transfers/ach — waluta EUR → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":50.00,\"currency\":\"\"
+}")
+check "POST /transfers/ach — pusta waluta → 400" 400 "$(status "$R")"
+
+# === Walidacja konta źródłowego ===
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_BOB}" -d "{
+  \"fromAccountId\":\"${BOB_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":99999.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/ach — brak środków → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"00000000-0000-0000-0000-000000000000\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":50.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/ach — fromAccountId nie istnieje → 404" 404 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JANE_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":50.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/ach — cudze fromAccountId → 404" 404 "$(status "$R")"
+
+R=$(req POST /transfers/ach -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"021000021\",
+  \"toAccountNumber\":\"987654321\",
+  \"amount\":50.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/ach — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "POST /transfers/ach — brak body → 400" 400 "$(status "$R")"
+
+# === Sprawdź że transfer widoczny w historii ===
+if [ -n "$ACH_TR_ID" ]; then
+  R=$(req GET "/transfers/${ACH_TR_ID}/status" -H "Authorization: Bearer ${TOKEN_JOHN}")
+  check "GET /transfers/{achId}/status — widoczny po utworzeniu → 200" 200 "$(status "$R")"
+  info "Status ACH transferu: $(jget "$(body "$R")" '.status')"
+else
+  skip "GET /transfers/{achId}/status" "brak ACH_TR_ID"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "13 · TRANSFERS — RTP"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":25.00,\"currency\":\"USD\",\"description\":\"RTP test\"
+}")
+check "POST /transfers/rtp — happy path → 201" 201 "$(status "$R")"
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":-1.00
+}")
+check "POST /transfers/rtp — ujemna kwota → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",\"amount\":25.00
+}")
+check "POST /transfers/rtp — brak toAccountNumber → 400" 400 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "14 · TRANSFERS — FedNow"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"amount\":15.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/fednow — happy path → 201" 201 "$(status "$R")"
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_BOB}" -d "{
+  \"fromAccountId\":\"${BOB_CHECKING}\",
+  \"toAccountNumber\":\"${JOHN_CHECKING_NUM}\",
+  \"amount\":99999.00
+}")
+check "POST /transfers/fednow — brak środków → 400" 400 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "15 · TRANSFERS — SWIFT"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"DE89370400440532013000\",\"bic\":\"DEUTDEDB\",
+  \"beneficiaryName\":\"Hans Müller\",
+  \"amount\":200.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — happy path → 201" 201 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"bic\":\"DEUTDEDB\",\"beneficiaryName\":\"Hans Müller\",
+  \"amount\":200.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — brak iban → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"DE89370400440532013000\",\"beneficiaryName\":\"Hans Müller\",
+  \"amount\":200.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — brak bic → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"DE89370400440532013000\",\"bic\":\"DEUTDEDB\",
+  \"amount\":200.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — brak beneficiaryName → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"DE89370400440532013000\",\"bic\":\"DEUTDEDB\",
+  \"beneficiaryName\":\"Hans Müller\",
+  \"amount\":0,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — kwota = 0 → 400" 400 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "16 · TRANSFERS — approve / reject"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if [ -n "$TOKEN_EMMA" ]; then
+  R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_EMMA}" -d "{
+    \"fromAccountId\":\"${JUNIOR_ACC_1}\",
+    \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+    \"amount\":1.00,\"currency\":\"USD\",\"description\":\"Junior approve test\"
+  }")
+  APPROVE_TR_ID=$(jget "$(body "$R")" '.id')
+  if [ "$(status "$R")" = "201" ] && [ -n "$APPROVE_TR_ID" ]; then
+    info "Pending transfer #1 (approve): ${APPROVE_TR_ID}"
+    R=$(req POST "/transfers/${APPROVE_TR_ID}/approve" -H "Authorization: Bearer ${TOKEN_JOHN}")
+    check "POST /transfers/{id}/approve — john zatwierdza → 200" 200 "$(status "$R")"
+    R=$(req POST "/transfers/${APPROVE_TR_ID}/approve" -H "Authorization: Bearer ${TOKEN_JOHN}")
+    check "POST /transfers/{id}/approve — ponowne zatwierdzenie → 409" 409 "$(status "$R")"
+  else
+    skip "approve — happy path" "nie udało się utworzyć pending transfer ($(status "$R"))"
+    skip "approve — ponowny" "brak pending transfer"
+  fi
+
+  R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_EMMA}" -d "{
+    \"fromAccountId\":\"${JUNIOR_ACC_1}\",
+    \"toAccountNumber\":\"${JOHN_SAVINGS_NUM}\",
+    \"amount\":1.00,\"currency\":\"USD\",\"description\":\"Junior reject test\"
+  }")
+  REJECT_TR_ID=$(jget "$(body "$R")" '.id')
+  if [ "$(status "$R")" = "201" ] && [ -n "$REJECT_TR_ID" ]; then
+    info "Pending transfer #2 (reject): ${REJECT_TR_ID}"
+    R=$(req POST "/transfers/${REJECT_TR_ID}/approve" -H "Authorization: Bearer ${TOKEN_JANE}")
+    check "POST /transfers/{id}/approve — zły parent → 401" 401 "$(status "$R")"
+    R=$(req POST "/transfers/${REJECT_TR_ID}/reject" -H "Authorization: Bearer ${TOKEN_JOHN}")
+    check "POST /transfers/{id}/reject — john odrzuca → 200" 200 "$(status "$R")"
+    R=$(req POST "/transfers/${REJECT_TR_ID}/reject" -H "Authorization: Bearer ${TOKEN_JOHN}")
+    check "POST /transfers/{id}/reject — już odrzucony → 409" 409 "$(status "$R")"
+  else
+    skip "reject — happy path" "nie udało się utworzyć pending transfer ($(status "$R"))"
+    skip "reject — zły parent" "brak pending transfer"
+    skip "reject — ponowny" "brak pending transfer"
+  fi
+else
+  skip "approve/reject — wszystkie" "brak TOKEN_EMMA"
+fi
+
+R=$(req POST "/transfers/${TR_COMPLETED}/approve" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "POST /transfers/{id}/approve — stan != pending_approval → 409" 409 "$(status "$R")"
+
+R=$(req POST "/transfers/00000000-0000-0000-0000-000000000000/reject" -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "POST /transfers/{id}/reject — nie istnieje → 404" 404 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "17 · TRANSFERS — webhook"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if [ -n "$ACH_TR_ID" ]; then
+  WH_STATUS_R=$(req GET "/transfers/${ACH_TR_ID}/status" -H "Authorization: Bearer ${TOKEN_JOHN}")
+  WH_STATUS=$(jget "$(body "$WH_STATUS_R")" '.status')
+  if [ "$WH_STATUS" = "pending" ] || [ "$WH_STATUS" = "processing" ]; then
+    R=$(req POST "/transfers/${ACH_TR_ID}/webhook" \
+      -H "X-Webhook-Secret: ${WEBHOOK_SECRET}" \
+      -d '{"status":"completed","referenceId":"ACH-DONE"}')
+    check "POST /transfers/{id}/webhook — completed → 200" 200 "$(status "$R")" "$(body "$R")"
+    R=$(req POST "/transfers/${ACH_TR_ID}/webhook" \
+      -H "X-Webhook-Secret: ${WEBHOOK_SECRET}" \
+      -d '{"status":"completed","referenceId":"ACH-DONE"}')
+    check "POST /transfers/{id}/webhook — już sfinalizowany → 400" 400 "$(status "$R")"
+  else
+    skip "webhook — completed" "ACH transfer w stanie '${WH_STATUS}' (nie pending)"
+    skip "webhook — już sfinalizowany" "ACH transfer już sfinalizowany"
+  fi
+else
+  skip "webhook — completed" "brak ACH_TR_ID"
+  skip "webhook — już sfinalizowany" "brak ACH_TR_ID"
+fi
+
+R=$(req POST "/transfers/${TR_SWIFT_PENDING}/webhook" \
+  -H "X-Webhook-Secret: wrong_secret" -d '{"status":"completed"}')
+check "POST /transfers/{id}/webhook — zły secret → 401" 401 "$(status "$R")"
+
+R=$(req POST "/transfers/${TR_SWIFT_PENDING}/webhook" -d '{"status":"completed"}')
+check "POST /transfers/{id}/webhook — brak X-Webhook-Secret → 401" 401 "$(status "$R")"
+
+R=$(req POST "/transfers/${TR_SWIFT_PENDING}/webhook" \
+  -H "X-Webhook-Secret: ${WEBHOOK_SECRET}" -d '{"status":"invalid_status"}')
+check "POST /transfers/{id}/webhook — nieprawidłowy status → 400" 400 "$(status "$R")"
+
+R=$(req POST "/transfers/${TR_SWIFT_PENDING}/webhook" \
+  -H "X-Webhook-Secret: ${WEBHOOK_SECRET}" -d '{"status":"failed"}')
+check_any "POST /transfers/{id}/webhook — failed → 200 lub 400" "200|400" "$(status "$R")"
+
+R=$(req POST "/transfers/00000000-0000-0000-0000-000000000000/webhook" \
+  -H "X-Webhook-Secret: ${WEBHOOK_SECRET}" -d '{"status":"completed"}')
+check "POST /transfers/{id}/webhook — nie istnieje → 404" 404 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "18 · CARDS — rejestracja"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if [ -n "$TEST_ACCOUNT_ID" ]; then
+  R=$(req POST "/accounts/${TEST_ACCOUNT_ID}/cards" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"type":"debit"}')
+  if $CARDS_GW_UP; then
+    check "POST /accounts/{id}/cards — debit → 201" 201 "$(status "$R")" "$(body "$R")"
+  else
+    check_any "POST /accounts/{id}/cards — debit (gateway off) → 201|503" "201|503" "$(status "$R")" "$(body "$R")"
+  fi
+  TEST_CARD_DEBIT_ID=$(jget "$(body "$R")" '.id')
+  info "Debit card ID: ${TEST_CARD_DEBIT_ID:-brak (gateway niedostępny?)}"
+
+  R=$(req POST "/accounts/${TEST_ACCOUNT_ID}/cards" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"type":"debit"}')
+  if [ -n "$TEST_CARD_DEBIT_ID" ]; then
+    check "POST /accounts/{id}/cards — debit duplikat → 409" 409 "$(status "$R")"
+  else
+    check_any "POST /accounts/{id}/cards — debit duplikat → 409|503" "409|503" "$(status "$R")"
+  fi
+
+  R=$(req POST "/accounts/${TEST_ACCOUNT_ID}/cards" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" \
+    -d '{"type":"prepaid","dailyLimit":200.00,"monthlyLimit":1000.00}')
+  if $CARDS_GW_UP; then
+    check "POST /accounts/{id}/cards — prepaid z limitami → 201" 201 "$(status "$R")" "$(body "$R")"
+  else
+    check_any "POST /accounts/{id}/cards — prepaid (gateway off) → 201|503" "201|503" "$(status "$R")" "$(body "$R")"
+  fi
+  TEST_CARD_PREPAID_ID=$(jget "$(body "$R")" '.id')
+  info "Prepaid card ID: ${TEST_CARD_PREPAID_ID:-brak}"
+else
+  skip "card register — debit/prepaid" "brak TEST_ACCOUNT_ID"
+fi
+
+R=$(req POST "/accounts/${TEST_ACCOUNT_ID:-00000000-0000-0000-0000-000000000000}/cards" \
+  -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"type":"credit"}')
+check "POST /accounts/{id}/cards — typ 'credit' → 400" 400 "$(status "$R")"
+
+R=$(req POST "/accounts/${TEST_ACCOUNT_ID:-00000000-0000-0000-0000-000000000000}/cards" \
+  -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"type":"prepaid","dailyLimit":5.00}')
+check "POST /accounts/{id}/cards — dailyLimit < 10 → 400" 400 "$(status "$R")"
+
+R=$(req POST "/accounts/${TEST_ACCOUNT_ID:-00000000-0000-0000-0000-000000000000}/cards" \
+  -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"type":"prepaid","dailyLimit":99999.00}')
+check "POST /accounts/{id}/cards — dailyLimit > 10000 → 400" 400 "$(status "$R")"
+
+R=$(req POST "/accounts/${JANE_CHECKING}/cards" \
+  -H "Authorization: Bearer ${TOKEN_JOHN}" -d '{"type":"prepaid"}')
+check "POST /accounts/{id}/cards — cudze konto → 401" 401 "$(status "$R")"
+
+R=$(req POST "/accounts/${TEST_ACCOUNT_ID:-00000000-0000-0000-0000-000000000000}/cards" \
+  -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"dailyLimit":100.00}')
+check "POST /accounts/{id}/cards — brak type → 400" 400 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "19 · CARDS — get"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if [ -n "$TEST_ACCOUNT_ID" ]; then
+  R=$(req GET "/accounts/${TEST_ACCOUNT_ID}/cards" -H "Authorization: Bearer ${TOKEN_TEST}")
+  check "GET /accounts/{id}/cards — własne → 200" 200 "$(status "$R")"
+  info "Karty test usera: $(jget "$(body "$R")" 'length')"
+
+  R=$(req GET "/accounts/${JANE_CHECKING}/cards" -H "Authorization: Bearer ${TOKEN_JOHN}")
+  check "GET /accounts/{id}/cards — cudze → 401" 401 "$(status "$R")"
+
+  if [ -n "$TEST_CARD_DEBIT_ID" ]; then
+    R=$(req GET "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}" \
+      -H "Authorization: Bearer ${TOKEN_TEST}")
+    check "GET /accounts/{id}/cards/{cardId} — własna debit → 200" 200 "$(status "$R")"
+
+    R=$(req GET "/accounts/${TEST_ACCOUNT_ID}/cards/00000000-0000-0000-0000-000000000000" \
+      -H "Authorization: Bearer ${TOKEN_TEST}")
+    check "GET /accounts/{id}/cards/{cardId} — nie istnieje → 404" 404 "$(status "$R")"
+
+    R=$(req GET "/accounts/${JOHN_SAVINGS}/cards/${TEST_CARD_DEBIT_ID}" \
+      -H "Authorization: Bearer ${TOKEN_JOHN}")
+    check "GET /accounts/{id}/cards/{cardId} — karta z innego konta → 404" 404 "$(status "$R")"
+
+    R=$(req GET "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}" \
+      -H "Authorization: Bearer ${TOKEN_JOHN}")
+    check "GET /accounts/{id}/cards/{cardId} — cudzy właściciel → 401" 401 "$(status "$R")"
+  else
+    skip "GET card — szczegóły/not-found/inne-konto/cudzy" "gateway niedostępny (brak TEST_CARD_DEBIT_ID)"
+  fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "20 · CARDS — update status"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if [ -n "$TEST_CARD_DEBIT_ID" ] && [ -n "$TEST_ACCOUNT_ID" ]; then
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"status":"blocked"}')
+  check "PATCH /cards/{id}/status — block → 200" 200 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"status":"blocked"}')
+  check "PATCH /cards/{id}/status — block ponownie → 409" 409 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"status":"active"}')
+  check "PATCH /cards/{id}/status — active (odblokuj) → 200" 200 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"status":"active"}')
+  check "PATCH /cards/{id}/status — active na active → 409" 409 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"status":"expired"}')
+  check "PATCH /cards/{id}/status — expired (niedozwolone) → 400" 400 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"status":"frozen"}')
+  check "PATCH /cards/{id}/status — nieznany status → 400" 400 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
+    -H "Authorization: Bearer ${TOKEN_JOHN}" -d '{"status":"blocked"}')
+  check "PATCH /cards/{id}/status — cudzy właściciel → 401" 401 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{}')
+  check "PATCH /cards/{id}/status — brak status → 400" 400 "$(status "$R")"
+else
+  skip "update status — wszystkie" "brak TEST_CARD_DEBIT_ID (gateway niedostępny)"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "21 · CARDS — update limits"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if [ -n "$TEST_CARD_DEBIT_ID" ] && [ -n "$TEST_ACCOUNT_ID" ]; then
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/limits" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"dailyLimit":200.00,"monthlyLimit":3000.00}')
+  check "PATCH /cards/{id}/limits — ustaw oba → 200" 200 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/limits" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"dailyLimit":150.00}')
+  check "PATCH /cards/{id}/limits — tylko dailyLimit → 200" 200 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/limits" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"monthlyLimit":5000.00}')
+  check "PATCH /cards/{id}/limits — tylko monthlyLimit → 200" 200 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/limits" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"dailyLimit":1.00}')
+  check "PATCH /cards/{id}/limits — dailyLimit < 10 → 400" 400 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/limits" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"dailyLimit":50000.00}')
+  check "PATCH /cards/{id}/limits — dailyLimit > 10000 → 400" 400 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/limits" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"monthlyLimit":10.00}')
+  check "PATCH /cards/{id}/limits — monthlyLimit < 50 → 400" 400 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/limits" \
+    -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"monthlyLimit":200000.00}')
+  check "PATCH /cards/{id}/limits — monthlyLimit > 100000 → 400" 400 "$(status "$R")"
+
+  R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/limits" \
+    -H "Authorization: Bearer ${TOKEN_JOHN}" -d '{"dailyLimit":100.00}')
+  check "PATCH /cards/{id}/limits — cudzy właściciel → 401" 401 "$(status "$R")"
+else
+  skip "update limits — wszystkie" "brak TEST_CARD_DEBIT_ID (gateway niedostępny)"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "22 · JUNIOR CARD"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if [ -n "$NEW_JUNIOR_ID" ]; then
+  R=$(req POST "/accounts/junior/${NEW_JUNIOR_ID}/card" \
+    -H "Authorization: Bearer ${TOKEN_JOHN}" \
+    -d '{"dailyLimit":50.00,"monthlyLimit":300.00}')
+  check "POST /accounts/junior/{id}/card — pierwsza karta → 201" 201 "$(status "$R")"
+
+  R=$(req POST "/accounts/junior/${NEW_JUNIOR_ID}/card" \
+    -H "Authorization: Bearer ${TOKEN_JOHN}" \
+    -d '{"dailyLimit":50.00,"monthlyLimit":300.00}')
+  check "POST /accounts/junior/{id}/card — duplikat → 409" 409 "$(status "$R")"
+else
+  skip "junior card — pierwsza/duplikat" "brak NEW_JUNIOR_ID"
+fi
+
+R=$(req POST "/accounts/junior/${JUNIOR_ACC_1}/card" \
+  -H "Authorization: Bearer ${TOKEN_JANE}" -d '{"dailyLimit":50.00}')
+check "POST /accounts/junior/{id}/card — cudzy junior → 401" 401 "$(status "$R")"
+
+R=$(req POST "/accounts/junior/${NEW_JUNIOR_ID:-dddd4444-1111-1111-1111-111111111111}/card" \
+  -H "Authorization: Bearer ${TOKEN_JOHN}" -d '{"dailyLimit":0.50}')
+check_any "POST /accounts/junior/{id}/card — dailyLimit < 10 → 400 lub 409" "400|409" "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "23 · EDGE CASES"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountId\":\"${JANE_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":1.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/internal — toAccountId + toAccountNumber razem → 201" 201 "$(status "$R")"
+
+R=$(req GET "/accounts/not-a-guid/balance" -H "Authorization: Bearer ${TOKEN_JOHN}")
+S=$(status "$R")
+if [ "$S" = "400" ] || [ "$S" = "404" ]; then
+  ok "GET /accounts/{not-a-guid}/balance — invalid GUID → ${S} (4xx)"
+else
+  fail "GET /accounts/{not-a-guid}/balance — oczekiwano 4xx, dostano ${S}"
+fi
+
+R=$(req POST /transfers/internal -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "POST /transfers/internal — brak body → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "POST /transfers/swift — brak body → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "POST /transfers/fednow — brak body → 400" 400 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PODSUMOWANIE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+TOTAL=$((PASS + FAIL + SKIP))
+echo ""
+echo -e "${BOLD}════════════════════════════════════════${NC}"
+echo -e "${BOLD}  Wyniki testów${NC}"
+echo -e "${BOLD}════════════════════════════════════════${NC}"
+echo -e "  ${GREEN}✓ Passed:${NC}  ${PASS}"
+echo -e "  ${RED}✗ Failed:${NC}  ${FAIL}"
+echo -e "  ${YELLOW}⊘ Skipped:${NC} ${SKIP}"
+echo -e "  Łącznie:   ${TOTAL}"
+echo ""
+
+$ACH_HELPER_UP || echo -e "${YELLOW}  ACH Helper niedostępny (${ACH_URL}) — uruchom FedSystems${NC}"
+$SFTP_UP       || echo -e "${YELLOW}  SFTP niedostępny (${SFTP_HOST}:${SFTP_PORT}) — uruchom FedSystems${NC}"
+$CARDS_GW_UP   || echo -e "${YELLOW}  Cards Gateway niedostępny (${CARDS_URL}) — uruchom Karty-Platnicze${NC}"
+echo ""
+
+if [ "$FAIL" -eq 0 ]; then
+  echo -e "${GREEN}${BOLD}Wszystkie testy przeszły!${NC}"
+  exit 0
+else
+  echo -e "${RED}${BOLD}${FAIL} testów nie przeszło.${NC}"
+  exit 1
+fi
