@@ -263,9 +263,9 @@ public class BlikKlikContractTests
         string? capturedApiKey = null;
         var handler = new SpyHandler((req, _) =>
         {
-            if (req.Headers.TryGetValues("X-KLIK-Api-Key", out var vals))
+            if (req.Headers.TryGetValues("X-KLIK-Bank-Api-Key", out var vals))
                 capturedApiKey = vals.FirstOrDefault();
-            else if (req.Headers.NonValidated.TryGetValues("X-KLIK-Api-Key", out var nv))
+            else if (req.Headers.NonValidated.TryGetValues("X-KLIK-Bank-Api-Key", out var nv))
                 capturedApiKey = nv.FirstOrDefault();
             return Task.FromResult(JsonOk(new
             {
