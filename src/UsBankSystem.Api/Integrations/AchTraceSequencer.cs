@@ -8,21 +8,35 @@ namespace UsBankSystem.Api.Integrations;
 /// Uses a PostgreSQL atomic upsert so multiple API instances never issue duplicate
 /// sequence numbers on the same business day.
 /// </summary>
-public sealed class AchTraceSequencer(IServiceScopeFactory scopeFactory)
+public sealed class AchTraceSequencer(IServiceScopeFactory scopeFactory) : IAchTraceSequencer
 {
     public async Task<int> NextAsync(CancellationToken ct = default)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var result = await db.Database
-            .SqlQueryRaw<int>(@"
+
+        // SqlQueryRaw<T> wraps DML in a subquery which PostgreSQL rejects.
+        // Use raw ADO.NET so INSERT...RETURNING executes directly.
+        // CloseConnectionAsync in finally: explicit OpenConnectionAsync marks the connection
+        // as externally owned, so EF Core will NOT close it on DbContext disposal.
+        await db.Database.OpenConnectionAsync(ct);
+        try
+        {
+            await using var cmd = db.Database.GetDbConnection().CreateCommand();
+            cmd.CommandText = @"
                 INSERT INTO ""AchDailyCounters"" (""Date"", ""Value"")
                 VALUES (CURRENT_DATE, 1)
                 ON CONFLICT (""Date"") DO UPDATE
                     SET ""Value"" = ""AchDailyCounters"".""Value"" + 1
-                RETURNING ""Value""")
-            .ToListAsync(ct);
-        return result[0];
+                RETURNING ""Value""";
+
+            var result = await cmd.ExecuteScalarAsync(ct);
+            return Convert.ToInt32(result);
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync();
+        }
     }
 
     // NACHA allows A–Z (1–26) then 0–9 (27–36) as file_id_modifier per originator per day.

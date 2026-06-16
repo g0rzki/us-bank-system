@@ -27,8 +27,8 @@ builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.FedNowPaymentServi
 builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.SwiftPaymentService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.CardService>();
 builder.Services.AddHostedService<UsBankSystem.Api.Services.CardExpiryJob>();
-builder.Services.AddSingleton<SftpService>();
-builder.Services.AddSingleton<AchTraceSequencer>();
+builder.Services.AddSingleton<ISftpService, SftpService>();
+builder.Services.AddSingleton<IAchTraceSequencer, AchTraceSequencer>();
 builder.Services.AddSingleton<IncomingTransferProcessor>();
 builder.Services.AddHostedService<AchPollingService>();
 // CORS

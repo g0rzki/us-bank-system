@@ -42,12 +42,8 @@ public class CreateAchTransferTests
         	FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
         });
 
-    private static AchGateway CreateGateway(HttpStatusCode statusCode, string body)
-    {
-        var handler = new MockHttpMessageHandler(statusCode, body);
-        var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:6001") };
-        return new AchGateway(client, NullLogger<AchGateway>.Instance);
-    }
+    private static AchGateway CreateGateway(HttpStatusCode statusCode, string body) =>
+        AchTestHelpers.CreateGateway(statusCode, body);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode gatewayStatus = HttpStatusCode.OK)
     {
@@ -125,6 +121,7 @@ public class CreateAchTransferTests
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 100m
         });
         var created = Assert.IsType<ObjectResult>(result);
@@ -141,6 +138,7 @@ public class CreateAchTransferTests
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 100m
         });
         var account = await db.Accounts.FindAsync(accountId);
@@ -158,6 +156,7 @@ public class CreateAchTransferTests
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 9999m
         }));
     }
@@ -172,6 +171,7 @@ public class CreateAchTransferTests
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 100m
         }));
         var account = await db.Accounts.FindAsync(accountId);
@@ -188,10 +188,12 @@ public class CreateAchTransferTests
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 100m
         });
         var transfer = await db.Transfers.FirstAsync();
-        Assert.Equal("ACH-REF-001", transfer.ExternalReferenceId);
+        // ExternalReferenceId is deterministic from transfer.Id — set before gateway call
+        Assert.Equal(AchGateway.ComputeFileId(transfer.Id), transfer.ExternalReferenceId);
     }
 }
 

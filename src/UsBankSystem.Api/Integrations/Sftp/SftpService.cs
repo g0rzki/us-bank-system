@@ -2,7 +2,7 @@ using Renci.SshNet;
 
 namespace UsBankSystem.Api.Integrations.Sftp;
 
-public class SftpService : IDisposable
+public class SftpService : ISftpService, IDisposable
 {
     private readonly ILogger<SftpService> _logger;
     private readonly string _host;

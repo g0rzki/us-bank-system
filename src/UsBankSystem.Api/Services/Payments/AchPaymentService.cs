@@ -54,7 +54,7 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
         // fileId is deterministic from transfer.Id — set it before the first save so ACK polling
         // can match the .ack file even if the process crashes after SFTP upload but before a
         // second SaveChangesAsync would have run.
-        transfer.ExternalReferenceId = transfer.Id.ToString("N")[..16].ToUpperInvariant();
+        transfer.ExternalReferenceId = AchGateway.ComputeFileId(transfer.Id);
 
         Db.Transfers.Add(transfer);
         Db.Transactions.Add(CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Pending, request.Description ?? "ACH transfer", transfer.Id));
@@ -79,9 +79,11 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
             transfer.Status = TransferStatus.Failed;
             fromAccount.ReservedBalance -= request.Amount;
 
-            // Mark the pending debit transaction as Failed so it doesn't stay orphaned
-            var pendingDebit = await Db.Transactions.FirstOrDefaultAsync(
-                t => t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit);
+            // Mark the pending debit transaction as Failed — look it up from the change
+            // tracker (it was just added and saved in the same DbContext unit-of-work).
+            var pendingDebit = Db.ChangeTracker.Entries<UsBankSystem.Core.Entities.Transaction>()
+                .FirstOrDefault(e => e.Entity.ReferenceId == transfer.Id.ToString()
+                                  && e.Entity.Type == TransactionType.Debit)?.Entity;
             if (pendingDebit is not null)
                 pendingDebit.Status = TransactionStatus.Failed;
 

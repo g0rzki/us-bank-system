@@ -43,9 +43,7 @@ public class CreateFedNowTransferTests
         });
 
     private static AchGateway CreateAchGateway() =>
-        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
-            { BaseAddress = new Uri("http://localhost:6001") },
-            NullLogger<AchGateway>.Instance);
+        AchTestHelpers.CreateGateway(HttpStatusCode.OK, "NACHA");
 
     private static RtpGateway CreateRtpGateway() =>
         new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))

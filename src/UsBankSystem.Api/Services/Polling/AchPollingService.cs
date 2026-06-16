@@ -11,7 +11,7 @@ namespace UsBankSystem.Api.Services.Polling;
 ///  - processed_*.ach — incoming transfers from other banks, credited to our customers
 /// </summary>
 public class AchPollingService(
-    SftpService sftp,
+    ISftpService sftp,
     IServiceScopeFactory scopeFactory,
     IncomingTransferProcessor incomingProcessor,
     IConfiguration configuration,
@@ -50,7 +50,9 @@ public class AchPollingService(
                 return;
             }
 
-            // FedSystems ACK format: line 2 starting with "R," means Rejected
+            // FedSystems ACK format: lines[0] = file header, lines[1] (1-indexed "line 2") = status.
+            // Status line starting with "R," means Rejected; anything else means Accepted.
+            // Verify against the actual ACK spec if format changes — index 1 is the assumption here.
             var isAccepted = !lines[1].StartsWith("R,", StringComparison.Ordinal);
 
             // Filename is {fileId}.ack — fileId is stored as ExternalReferenceId
@@ -98,7 +100,9 @@ public class AchPollingService(
     private async Task ProcessIncomingAchFilesAsync(List<string> fileNames, CancellationToken ct)
     {
         var ourRtn = configuration["Ach:RoutingNumber"] ?? "110000000";
-        var ourDfiId = ourRtn[..8]; // 8-char DFI portion
+        if (ourRtn.Length < 9)
+            throw new InvalidOperationException($"Ach:RoutingNumber '{ourRtn}' must be 9 digits (got {ourRtn.Length})");
+        var ourDfiId = ourRtn[..8];
 
         var entries = new List<IncomingTransferProcessor.IncomingEntry>();
         var downloadedFiles = new List<string>();
@@ -132,14 +136,14 @@ public class AchPollingService(
         }
     }
 
+    // 22 = checking credit, 32 = savings credit (live entries only; prenotes 23/33 excluded)
+    private static readonly HashSet<string> CreditCodes = ["22", "32"];
+
     private static IEnumerable<IncomingTransferProcessor.IncomingEntry> ParseIncomingAch(string text, string ourDfiId, string fileName)
     {
         // NACHA fixed-width format, 94-char lines
         // Entry detail: pos 1='6', pos 2-3=tx code, pos 4-11=RDFI routing, pos 12=check digit,
         //               pos 13-29=account number, pos 30-39=amount cents, pos 55-76=individual name
-        // 22/32 = live credit entries (checking/savings). Prenote codes 23/33 have zero amount
-        // and are excluded — they don't transfer money and would be filtered by amountCents <= 0 anyway.
-        var creditCodes = new HashSet<string> { "22", "32" };
 
         foreach (var rawLine in text.Split('\n'))
         {
@@ -148,7 +152,7 @@ public class AchPollingService(
             if (line[0] != '6') continue;
 
             var txCode = line.Substring(1, 2);
-            if (!creditCodes.Contains(txCode)) continue;
+            if (!CreditCodes.Contains(txCode)) continue;
 
             var rdfi = line.Substring(3, 8);
             if (!rdfi.Equals(ourDfiId, StringComparison.Ordinal)) continue;

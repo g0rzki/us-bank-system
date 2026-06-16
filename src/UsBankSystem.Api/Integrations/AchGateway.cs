@@ -8,10 +8,15 @@ namespace UsBankSystem.Api.Integrations;
 
 // ACH uses SFTP/NACHA instead of REST, so it does not inherit PaymentGatewayBase
 // (which is designed for HTTP-based gateways like RTP, FedNow, SWIFT, Cards).
-public class AchGateway(HttpClient httpClient, SftpService sftp, AchTraceSequencer traceSequencer, IConfiguration configuration, ILogger<AchGateway> logger)
+public class AchGateway(HttpClient httpClient, ISftpService sftp, IAchTraceSequencer traceSequencer, IConfiguration configuration, ILogger<AchGateway> logger)
     : IPaymentGateway
 {
     public string Channel => TransferChannel.Ach;
+
+    // Single authoritative formula for the SFTP filename / ExternalReferenceId.
+    // Both AchGateway (upload) and AchPaymentService (DB persist) must use this.
+    public static string ComputeFileId(Guid transferId) =>
+        transferId.ToString("N")[..16].ToUpperInvariant();
 
     private string OurRtn => configuration["Ach:RoutingNumber"] ?? "110000000";
     private string OurLegalName => configuration["Ach:LegalName"] ?? "US Bank A";
@@ -20,6 +25,10 @@ public class AchGateway(HttpClient httpClient, SftpService sftp, AchTraceSequenc
     // NACHA company_identification should be a 10-char EIN or company ID, not the RTN.
     // Defaults to RTN for backward compatibility — set Ach:CompanyId in production.
     private string CompanyId => configuration["Ach:CompanyId"] ?? OurRtn;
+    // ABA routing numbers are always 9 digits; first 8 are the DFI identifier used in NACHA.
+    private string OurDfiId => OurRtn.Length >= 9
+        ? OurRtn[..8]
+        : throw new InvalidOperationException($"Ach:RoutingNumber '{OurRtn}' must be 9 digits (got {OurRtn.Length})");
 
     public async Task<PaymentGatewayResult> SendAsync(PaymentGatewayRequest request, CancellationToken cancellationToken = default)
     {
@@ -29,7 +38,7 @@ public class AchGateway(HttpClient httpClient, SftpService sftp, AchTraceSequenc
             var toAccount = request.Metadata?["toAccountNumber"] ?? throw new ArgumentException("toAccountNumber required");
             var recipientName = request.Metadata?["recipientName"] ?? throw new ArgumentException("recipientName required");
             var accountType = request.Metadata?.GetValueOrDefault("accountType") ?? "checking";
-            var fileId = request.TransferId.ToString("N")[..16].ToUpperInvariant();
+            var fileId = ComputeFileId(request.TransferId);
             var fileName = $"{fileId}.ach";
 
             var achContent = await GenerateAchFileAsync(request, toRtn, toAccount, recipientName, accountType, fileId, cancellationToken);
@@ -45,7 +54,10 @@ public class AchGateway(HttpClient httpClient, SftpService sftp, AchTraceSequenc
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "ACH gateway failed for transfer {TransferId}", request.TransferId);
+            // The daily sequence counter is incremented before file generation (seq is embedded
+            // in the NACHA content). A failure here permanently burns that slot — operators
+            // should monitor daily slot usage if SFTP outages or ACH-helper errors are frequent.
+            logger.LogError(ex, "ACH gateway failed for transfer {TransferId} — a daily sequence slot may have been consumed", request.TransferId);
             return new PaymentGatewayResult(false, null, "ACH transfer submission failed");
         }
     }
@@ -79,7 +91,7 @@ public class AchGateway(HttpClient httpClient, SftpService sftp, AchTraceSequenc
                             standard_entry_class_code = "PPD",
                             company_entry_description = "TRANSFER",
                             effective_entry_date = now.AddDays(1).ToString("yyMMdd"),
-                            originating_dfi_identification = OurRtn[..8]
+                            originating_dfi_identification = OurDfiId
                         },
                         entries = new[]
                         {
@@ -91,7 +103,7 @@ public class AchGateway(HttpClient httpClient, SftpService sftp, AchTraceSequenc
                                 dfi_account_number = toAccount,
                                 amount_cents = (long)Math.Round(request.Amount * 100, MidpointRounding.AwayFromZero),
                                 individual_name = recipientName[..Math.Min(22, recipientName.Length)],
-                                trace_number = $"{OurRtn[..8]}{seq:D7}"
+                                trace_number = $"{OurDfiId}{seq:D7}"
                             }
                         }
                     }
