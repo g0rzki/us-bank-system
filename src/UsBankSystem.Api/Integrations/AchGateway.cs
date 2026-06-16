@@ -28,10 +28,11 @@ public class AchGateway(HttpClient httpClient, SftpService sftp, AchTraceSequenc
             var toRtn = request.Metadata?["toRoutingNumber"] ?? throw new ArgumentException("toRoutingNumber required");
             var toAccount = request.Metadata?["toAccountNumber"] ?? throw new ArgumentException("toAccountNumber required");
             var recipientName = request.Metadata?["recipientName"] ?? throw new ArgumentException("recipientName required");
+            var accountType = request.Metadata?.GetValueOrDefault("accountType") ?? "checking";
             var fileId = request.TransferId.ToString("N")[..16].ToUpperInvariant();
             var fileName = $"{fileId}.ach";
 
-            var achContent = await GenerateAchFileAsync(request, toRtn, toAccount, recipientName, fileId, cancellationToken);
+            var achContent = await GenerateAchFileAsync(request, toRtn, toAccount, recipientName, accountType, fileId, cancellationToken);
             await sftp.UploadAsync($"inbound/{fileName}", achContent, cancellationToken);
 
             logger.LogInformation("ACH: uploaded {File} for transfer {TransferId}", fileName, request.TransferId);
@@ -49,10 +50,10 @@ public class AchGateway(HttpClient httpClient, SftpService sftp, AchTraceSequenc
         }
     }
 
-    private async Task<byte[]> GenerateAchFileAsync(PaymentGatewayRequest request, string toRtn, string toAccount, string recipientName, string fileId, CancellationToken ct)
+    private async Task<byte[]> GenerateAchFileAsync(PaymentGatewayRequest request, string toRtn, string toAccount, string recipientName, string accountType, string fileId, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
-        var seq = traceSequencer.Next();
+        var seq = await traceSequencer.NextAsync(ct);
         var achJson = new
         {
             data = new
@@ -84,11 +85,8 @@ public class AchGateway(HttpClient httpClient, SftpService sftp, AchTraceSequenc
                         {
                             new
                             {
-                                // Code 22 = automated deposit to checking account (PPD).
-                                // Savings accounts require code 32. Current API has no account-type
-                                // parameter, so all outgoing transfers use checking. Revisit before
-                                // enabling savings-to-savings ACH in production.
-                                transaction_code = "22",
+                                // Code 22 = automated deposit to checking (PPD), 32 = savings.
+                                transaction_code = accountType == "savings" ? "32" : "22",
                                 receiving_dfi_rtn = toRtn,
                                 dfi_account_number = toAccount,
                                 amount_cents = (long)Math.Round(request.Amount * 100, MidpointRounding.AwayFromZero),

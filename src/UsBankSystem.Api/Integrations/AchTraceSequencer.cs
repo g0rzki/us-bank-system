@@ -1,46 +1,36 @@
+using Microsoft.EntityFrameworkCore;
+using UsBankSystem.Infrastructure.Persistence;
+
 namespace UsBankSystem.Api.Integrations;
 
 /// <summary>
-/// Thread-safe per-day sequence counter for NACHA trace numbers and file_id_modifier.
-/// NACHA requires trace number uniqueness per originator per business day.
-/// Seeded from the current second-of-day on startup so a mid-day restart won't
-/// reuse sequence numbers issued before the restart.
-/// For multi-instance deployments replace with a DB-backed atomic sequence.
+/// DB-backed per-day sequence counter for NACHA trace numbers and file_id_modifier.
+/// Uses a PostgreSQL atomic upsert so multiple API instances never issue duplicate
+/// sequence numbers on the same business day.
 /// </summary>
-public sealed class AchTraceSequencer
+public sealed class AchTraceSequencer(IServiceScopeFactory scopeFactory)
 {
-    private int _lastDayKey;
-    private int _counter;
-    private readonly object _lock = new();
-
-    public AchTraceSequencer()
+    public async Task<int> NextAsync(CancellationToken ct = default)
     {
-        var now = DateTime.UtcNow;
-        _lastDayKey = now.Year * 1000 + now.DayOfYear;
-        // Seed from second-of-day (0–86 399) so mid-day restarts don't collide
-        // with sequence numbers already issued earlier the same business day.
-        _counter = (int)now.TimeOfDay.TotalSeconds;
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var result = await db.Database
+            .SqlQueryRaw<int>(@"
+                INSERT INTO ""AchDailyCounters"" (""Date"", ""Value"")
+                VALUES (CURRENT_DATE, 1)
+                ON CONFLICT (""Date"") DO UPDATE
+                    SET ""Value"" = ""AchDailyCounters"".""Value"" + 1
+                RETURNING ""Value""")
+            .ToListAsync(ct);
+        return result[0];
     }
 
-    public int Next()
-    {
-        lock (_lock)
-        {
-            var now = DateTime.UtcNow;
-            var dayKey = now.Year * 1000 + now.DayOfYear;
-            if (dayKey != _lastDayKey)
-            {
-                _lastDayKey = dayKey;
-                _counter = 0;
-            }
-            return ++_counter; // fits in NACHA's 7-digit sequence field (max 9,999,999/day)
-        }
-    }
-
-    // Maps a 1-based daily sequence to a single NACHA file_id_modifier char.
-    // NACHA allows A–Z (1–26) then 0–9 (27–36). Wraps A–Z after 36.
+    // NACHA allows A–Z (1–26) then 0–9 (27–36) as file_id_modifier per originator per day.
+    // After 36, there are no unique single-char values left in the NACHA spec.
     public static char FileIdModifier(int seq) =>
         seq is >= 1 and <= 26 ? (char)('A' + seq - 1) :
         seq is >= 27 and <= 36 ? (char)('0' + seq - 27) :
-        (char)('A' + (seq - 1) % 26);
+        throw new InvalidOperationException(
+            $"NACHA daily file limit exceeded ({seq} files today, max 36 per spec). " +
+            "Batch multiple entries per file to increase daily throughput.");
 }

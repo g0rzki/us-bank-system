@@ -22,6 +22,9 @@ public class CreateAchTransferRequest : IValidatableObject
     [Range(0.01, double.MaxValue)]
     public decimal Amount { get; set; }
 
+    [RegularExpression(@"^(checking|savings)$", ErrorMessage = "AccountType must be 'checking' or 'savings'")]
+    public string AccountType { get; set; } = "checking";
+
     public string Currency { get; set; } = "USD";
     public string? Description { get; set; }
 

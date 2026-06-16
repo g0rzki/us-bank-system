@@ -69,7 +69,8 @@ public class AchPaymentService(AppDbContext db, AchGateway achGateway, IOptions<
             {
                 ["toRoutingNumber"] = request.ToRoutingNumber,
                 ["toAccountNumber"] = request.ToAccountNumber,
-                ["recipientName"] = request.RecipientName
+                ["recipientName"] = request.RecipientName,
+                ["accountType"] = request.AccountType
             }
         ));
 
