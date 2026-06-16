@@ -27,7 +27,7 @@ function PendingRow({ transfer, onAction }: { transfer: PendingApprovalTransfer;
         try {
             if (action === 'approve') await approveTransfer(transfer.id);
             else await rejectTransfer(transfer.id);
-            showToast(action === 'approve' ? 'Transfer approved' : 'Transfer rejected');
+            showToast(action === 'approve' ? 'Transfer approved' : 'Transfer rejected', action === 'approve' ? 'success' : 'info');
             onAction();
         } catch (e: any) {
             showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Action failed');
@@ -102,7 +102,7 @@ export default function JuniorAccountList({ accounts, pendingByAccount = {}, onP
             setSelected(updated);
             setLocalAccounts(prev => prev.map(a => a.juniorAccountId === selected.juniorAccountId ? updated : a));
             setAddingCard(false);
-            showToast('Card added successfully');
+            showToast('Card added successfully', 'success');
         } catch (e: any) {
             showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to add card');
         } finally {

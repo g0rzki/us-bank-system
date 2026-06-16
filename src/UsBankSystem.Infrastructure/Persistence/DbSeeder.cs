@@ -539,68 +539,6 @@ public static class DbSeeder
 
         context.Transfers.AddRange(transfers);
 
-        // Cards
-        var cards = new List<Card>
-        {
-            new()
-            {
-                Id = new Guid("cccc0001-0000-0000-0000-000000000001"),
-                AccountId = account1Checking.Id,
-                Last4 = "4532",
-                Type = "debit",
-                Status = "active",
-                ExternalCardToken = "tok_visa_debit_001",
-                ExpiresAt = DateTime.UtcNow.AddYears(3),
-                CreatedAt = account1Checking.CreatedAt.AddDays(1)
-            },
-            new()
-            {
-                Id = new Guid("cccc0002-0000-0000-0000-000000000002"),
-                AccountId = account1Savings.Id,
-                Last4 = "7741",
-                Type = "debit",
-                Status = "active",
-                ExternalCardToken = "tok_visa_debit_002",
-                ExpiresAt = DateTime.UtcNow.AddYears(4),
-                CreatedAt = account1Savings.CreatedAt.AddDays(2)
-            },
-            new()
-            {
-                Id = new Guid("cccc0003-0000-0000-0000-000000000003"),
-                AccountId = account2Checking.Id,
-                Last4 = "8901",
-                Type = "prepaid",
-                Status = "active",
-                ExternalCardToken = "tok_visa_prepaid_001",
-                ExpiresAt = DateTime.UtcNow.AddYears(2),
-                CreatedAt = account2Checking.CreatedAt.AddDays(1)
-            },
-            new()
-            {
-                Id = new Guid("cccc0004-0000-0000-0000-000000000004"),
-                AccountId = account1Checking.Id,
-                Last4 = "1234",
-                Type = "prepaid",
-                Status = "blocked",
-                BlockedAt = DateTime.UtcNow.AddHours(-25),
-                ExternalCardToken = "tok_mc_prepaid_001",
-                ExpiresAt = DateTime.UtcNow.AddYears(1),
-                CreatedAt = account1Checking.CreatedAt.AddDays(3)
-            },
-            new()
-            {
-                Id = new Guid("cccc0005-0000-0000-0000-000000000005"),
-                AccountId = account1Checking.Id,
-                Last4 = "9999",
-                Type = "prepaid",
-                Status = "expired",
-                ExternalCardToken = "tok_mc_prepaid_old",
-                ExpiresAt = DateTime.UtcNow.AddMonths(-3),
-                CreatedAt = account1Checking.CreatedAt.AddMonths(-24)
-            }
-        };
-
-        context.Cards.AddRange(cards);
 
         // BlikCodes
         var blikCodes = new List<BlikCode>
@@ -664,17 +602,6 @@ public static class DbSeeder
 
         context.JuniorAccounts.AddRange(juniorLinks);
 
-        var juniorCards = new List<Card>
-        {
-            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), Last4 = "9001", Type = "prepaid", Status = "active", DailyLimit = 50.00m,  MonthlyLimit = 300.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddMonths(-2).AddDays(1) },
-            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), Last4 = "9002", Type = "prepaid", Status = "active", DailyLimit = 30.00m,  MonthlyLimit = 150.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddMonths(-1).AddDays(1) },
-            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), Last4 = "9003", Type = "prepaid", Status = "active", DailyLimit = 100.00m, MonthlyLimit = 500.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddDays(-14) },
-            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), Last4 = "9004", Type = "prepaid", Status = "active", DailyLimit = 40.00m,  MonthlyLimit = 200.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddMonths(-2).AddDays(1) },
-            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), Last4 = "9005", Type = "prepaid", Status = "active", DailyLimit = 25.00m,  MonthlyLimit = 100.00m, ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddMonths(-1).AddDays(1) },
-            new() { Id = Guid.NewGuid(), AccountId = Guid.Parse("dddd4444-6666-6666-6666-666666666666"), Last4 = "9006", Type = "prepaid", Status = "active", DailyLimit = null,    MonthlyLimit = null,    ExpiresAt = DateTime.UtcNow.AddYears(3), CreatedAt = DateTime.UtcNow.AddDays(-9) },
-        };
-
-        context.Cards.AddRange(juniorCards);
 
         // Junior transactions
         var juniorTransactions = new List<Transaction>

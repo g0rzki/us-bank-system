@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using UsBankSystem.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using UsBankSystem.Infrastructure.Persistence;
 namespace UsBankSystem.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260609134219_AddCardMaskedPan")]
+    partial class AddCardMaskedPan
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -72,69 +75,6 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.ToTable("Accounts");
                 });
 
-            modelBuilder.Entity("UsBankSystem.Core.Entities.BlikAuthorization", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal>("Amount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Currency")
-                        .IsRequired()
-                        .HasMaxLength(3)
-                        .HasColumnType("character varying(3)");
-
-                    b.Property<DateTime?>("DecidedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ExpiryTime")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsOnUs")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("KlikTransactionId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid?>("LocalTransactionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("MerchantName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)")
-                        .HasDefaultValue("pending");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("KlikTransactionId")
-                        .IsUnique();
-
-                    b.HasIndex("UserId", "Status");
-
-                    b.ToTable("BlikAuthorizations");
-                });
-
             modelBuilder.Entity("UsBankSystem.Core.Entities.BlikCode", b =>
                 {
                     b.Property<Guid>("Id")
@@ -144,10 +84,9 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Code")
+                    b.Property<string>("CodeHash")
                         .IsRequired()
-                        .HasMaxLength(6)
-                        .HasColumnType("character varying(6)");
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -155,19 +94,10 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)")
-                        .HasDefaultValue("active");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                    b.Property<bool>("Used")
+                        .HasColumnType("boolean");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("UserId");
 
                     b.HasIndex("AccountId", "ExpiresAt");
 
@@ -414,17 +344,6 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("UsBankSystem.Core.Entities.BlikAuthorization", b =>
-                {
-                    b.HasOne("UsBankSystem.Core.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("UsBankSystem.Core.Entities.BlikCode", b =>
                 {
                     b.HasOne("UsBankSystem.Core.Entities.Account", "Account")
@@ -433,15 +352,7 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("UsBankSystem.Core.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.Navigation("Account");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("UsBankSystem.Core.Entities.Card", b =>

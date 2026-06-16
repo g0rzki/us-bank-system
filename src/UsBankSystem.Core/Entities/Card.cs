@@ -8,6 +8,7 @@ public class Card
     public string Type { get; set; } = null!;         // debit | prepaid
     public string Status { get; set; } = "active";    // active | blocked | expired
     public string? ExternalCardToken { get; set; }    // token z modułu kart
+    public string? MaskedPan { get; set; }            // np. "4700 01** **** 1234" z payment-gateway
     public DateTime ExpiresAt { get; set; }
     public DateTime? BlockedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

@@ -32,8 +32,9 @@ public class RegisterCardTests
             })
             .Build();
 
-    private CardsGateway CreateGateway(HttpStatusCode status = HttpStatusCode.OK, string body = "{\"cardToken\":\"tok_test\"}") =>
+    private CardsGateway CreateGateway(HttpStatusCode status = HttpStatusCode.OK, string body = "{\"card_token\":\"tok_test\",\"masked_pan\":\"**** **** **** 1234\"}") =>
         new(new HttpClient(new MockHttpMessageHandler(status, body)) { BaseAddress = new Uri("http://localhost:6005") },
+            CreateConfig(),
             NullLogger<CardsGateway>.Instance);
 
     private CardsController CreateController(AppDbContext db, Guid userId, CardsGateway? gateway = null)
@@ -209,16 +210,15 @@ public class RegisterCardTests
     }
 
     [Fact]
-    public async Task RegisterCard_GatewayFailure_StillSavesCard()
+    public async Task RegisterCard_GatewayFailure_ThrowsAndDoesNotSaveCard()
     {
         var (db, userId, accountId, _) = await Setup();
         var failingGateway = CreateGateway(HttpStatusCode.InternalServerError, "error");
         var controller = CreateController(db, userId, failingGateway);
 
-        await controller.RegisterCard(accountId, new RegisterCardRequest { Type = "debit" });
+        await Assert.ThrowsAsync<GatewayUnavailableException>(() =>
+            controller.RegisterCard(accountId, new RegisterCardRequest { Type = "debit" }));
 
-        var card = await db.Cards.FirstAsync();
-        Assert.Null(card.ExternalCardToken);
-        Assert.Equal("active", card.Status);
+        Assert.Equal(0, await db.Cards.CountAsync());
     }
 }

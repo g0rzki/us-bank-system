@@ -63,6 +63,7 @@ export default function AccountsView({ accounts, onAccountCreated }: {
             setJuniorAccounts(prev => [...prev, created]);
             setShowJuniorForm(false);
             setJuniorEmail(''); setJuniorPassword(''); setJuniorFirstName(''); setJuniorLastName(''); setJuniorDob('');
+            showToast('Junior account created successfully', 'success');
         } catch (e: any) {
             showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to create junior account.');
         } finally {
@@ -75,6 +76,7 @@ export default function AccountsView({ accounts, onAccountCreated }: {
         try {
             const account = await createAccount(type);
             onAccountCreated(account);
+            showToast(`${type.charAt(0).toUpperCase() + type.slice(1)} account created`, 'success');
         } catch (e: any) {
             showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Failed to create account. Please try again.');
         } finally {

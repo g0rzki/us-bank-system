@@ -6,20 +6,23 @@ const CHANNEL_LABELS: Record<string, string> = {
     rtp: 'RTP',
     fednow: 'FedNow',
     swift: 'SWIFT',
+    card: 'Card payment',
 };
 
 export default function TransactionDetails({ tx }: { tx: Transaction }) {
     const isDebit = tx.type === 'debit';
+    const isCard = tx.channel === 'card' || tx.description?.startsWith('Card');
+    const channel = tx.channel ?? (isCard ? 'card' : null);
     return (
         <div className="db-tx-details">
             <div className="db-tx-detail-row">
                 <span className="db-tx-detail-label">Date & time</span>
                 <span>{new Date(tx.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}</span>
             </div>
-            {tx.channel && (
+            {channel && (
                 <div className="db-tx-detail-row">
                     <span className="db-tx-detail-label">Transfer type</span>
-                    <span>{CHANNEL_LABELS[tx.channel] ?? tx.channel.toUpperCase()}</span>
+                    <span>{CHANNEL_LABELS[channel] ?? channel.toUpperCase()}</span>
                 </div>
             )}
             {tx.counterpartyAccountNumber && (
