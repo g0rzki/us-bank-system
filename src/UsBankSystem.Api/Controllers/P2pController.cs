@@ -10,6 +10,16 @@ namespace UsBankSystem.Api.Controllers;
 [Tags("P2P")]
 public class P2pController(PhoneAliasService phoneAliasService) : ControllerBase
 {
+    [HttpGet("accounts/{accountId:guid}/phone-alias")]
+    [ProducesResponseType<PhoneAliasResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetAlias(Guid accountId)
+    {
+        var result = await phoneAliasService.GetAliasAsync(UserId(), accountId);
+        return result is null ? NotFound() : Ok(result);
+    }
+
     [HttpPost("accounts/{accountId:guid}/phone-alias")]
     [ProducesResponseType<PhoneAliasResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

@@ -59,6 +59,20 @@ public class PhoneAliasService(
         return MapToResponse(alias);
     }
 
+    public async Task<PhoneAliasResponse?> GetAliasAsync(Guid userId, Guid accountId)
+    {
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId)
+            ?? throw new KeyNotFoundException("Account not found");
+
+        if (account.UserId != userId)
+            throw new UnauthorizedAccessException("Account does not belong to the current user");
+
+        var alias = await db.PhoneAliases
+            .FirstOrDefaultAsync(p => p.AccountId == accountId && p.Status == PhoneAliasStatus.Active);
+
+        return alias is null ? null : MapToResponse(alias);
+    }
+
     public async Task DeleteAliasAsync(Guid userId, Guid accountId)
     {
         await GuardJuniorAsync(userId);
