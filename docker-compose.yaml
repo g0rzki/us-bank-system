@@ -40,6 +40,7 @@ services:
       - Integrations__BlikUrl=${INTEGRATIONS_BLIK_URL:-http://mock-gateways:6006}
       - Integrations__KlikApiKey=dev-key
       - Klik__WebhookSecret=${KLIK_WEBHOOK_SECRET}
+      - Klik__AllowUnsignedWebhooks=${KLIK_ALLOW_UNSIGNED_WEBHOOKS:-false}
       - Cards__ApiKey=${CARDS_API_KEY}
       - Cards__HmacSecret=${CARDS_HMAC_SECRET}
       - Cards__AdminKey=${CARDS_ADMIN_KEY}

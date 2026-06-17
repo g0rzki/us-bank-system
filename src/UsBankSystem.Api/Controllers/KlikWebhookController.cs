@@ -9,7 +9,7 @@ namespace UsBankSystem.Api.Controllers;
 [Route("klik/webhook")]
 [AllowAnonymous]
 [Tags("KlikWebhook")]
-public class KlikWebhookController(BlikService blikService, IConfiguration cfg) : ControllerBase
+public class KlikWebhookController(BlikService blikService, IConfiguration cfg, ILogger<KlikWebhookController> logger) : ControllerBase
 {
     [HttpPost("authorize")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -38,7 +38,15 @@ public class KlikWebhookController(BlikService blikService, IConfiguration cfg) 
     {
         var secret = cfg["Klik:WebhookSecret"];
         if (string.IsNullOrEmpty(secret))
-            return true;
+        {
+            var allowUnsigned = string.Equals(cfg["Klik:AllowUnsignedWebhooks"], "true", StringComparison.OrdinalIgnoreCase);
+            if (allowUnsigned)
+            {
+                logger.LogWarning("Webhook secret not configured but AllowUnsignedWebhooks=true — accepting unsigned webhook");
+                return true;
+            }
+            return false;
+        }
 
         return Request.Headers.TryGetValue("X-Webhook-Secret", out var hdr) && hdr == secret;
     }
