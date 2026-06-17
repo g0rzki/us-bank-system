@@ -10,7 +10,7 @@ Aplikacja webowa symulująca działanie amerykańskiego banku detalicznego. Proj
 - FedNow — przelew RTGS przez bank centralny
 - SWIFT — przelew międzynarodowy
 - Karty płatnicze (integracja) — transakcje tylko w USD
-- BLIK — przelewy natychmiastowe (integracja)
+- BLIK — płatności kodem i przelewy na numer telefonu (integracja KLIK)
 - Konto junior (7-13 lat) — podpięte do konta rodzica, wszystkie transakcje wymagają zatwierdzenia przez rodzica, możliwość podpięcia karty prepaid z limitami
 
 ## Stack
@@ -82,8 +82,58 @@ Integracja z zewnętrznym systemem **Karty-Platnicze-Aplikacje-Biznesowe** (paym
 - Zablokowana karta może zostać odblokowana dopiero po 24h od zablokowania
 - Topup dostępny tylko dla kart prepaid w statusie `active`
 
-### BLIK
-> 📝 TODO (US-58) — opis mechanizmu, kod 6-cyfrowy, settlement przez RTP
+### BLIK (integracja KLIK)
+
+Integracja z systemem **KLIK** (akademicki klon BLIK). Bank działa jako klient API KLIK
+i wystawia webhook do odbioru autoryzacji płatności.
+
+#### C2B — płatność kodem
+
+Klient generuje 6-cyfrowy kod BLIK w aplikacji banku i pokazuje go kasjerowi lub terminalowi.
+KLIK zarządza kodem i przesyła autoryzację do banku przez webhook.
+
+**Flow:**
+1. Klient klika „Generuj kod" → bank wywołuje `POST /api/v1/codes/generate` w KLIK → kod ważny 120s
+2. Klient pokazuje kod kasjerowi / terminalowi
+3. Terminal wywołuje inicjację w KLIK → KLIK wysyła webhook `POST /klik/webhook/authorize` do banku
+4. Bank natychmiast odpowiada `{received: true}` i pokazuje użytkownikowi modal z kwotą i sprzedawcą
+5. Użytkownik zatwierdza lub odrzuca → bank wywołuje `POST /api/v1/payments/confirm` w KLIK i obciąża konto (ACCEPTED) lub odrzuca (REJECTED)
+
+Rozliczenie międzybankowe (fee: 1% KLIK + 0.5% terminal) przeprowadza KLIK — bank obciąża wyłącznie konto klienta.
+
+#### P2P — przelew na numer telefonu
+
+Klient rejestruje numer telefonu jako alias swojego konta w systemie KLIK. Inni użytkownicy (z dowolnego banku zintegrowanego z KLIK) mogą wtedy przelać pieniądze, podając tylko numer telefonu odbiorcy.
+
+**Flow:**
+1. Klient rejestruje alias: `POST /accounts/{id}/phone-alias` → bank rejestruje alias w KLIK
+2. Nadawca inicjuje przelew: `POST /transfers/p2p` z numerem telefonu odbiorcy
+3. Bank sprawdza alias w KLIK (`GET /api/v1/aliases/lookup/{phone}`)
+4. Jeśli odbiorca jest w tym samym banku (routing number match) → przelew wewnętrzny (natychmiastowy)
+5. Jeśli odbiorca jest w innym banku → przelew zewnętrzny przez FedNow z rezerwacją salda
+
+#### Ograniczenia funkcji BLIK
+- Konto junior nie ma dostępu do BLIK ani do P2P
+- Jedno aktywne konto może mieć max 1 aktywny alias telefoniczny
+- Numer telefonu w formacie E.164 dla strefy US (`+1` + 10 cyfr, np. `+15551234567`)
+
+#### Znane ograniczenia
+
+> **P2P off-us (FedNow, odbiorca w innym banku KLIK) nie był zweryfikowany end-to-end na żywo
+> z drugim bankiem.** W środowisku testowym był zarejestrowany tylko jeden bank. Logika jest
+> pokryta testami jednostkowymi z zamockowanym klientem KLIK P2P, ale nie testem integracyjnym
+> live. Do pełnej weryfikacji wymagany jest drugi bank zarejestrowany w instancji KLIK.
+
+#### Konfiguracja KLIK
+
+```env
+INTEGRATIONS_BLIK_URL=http://localhost:6006      # dev: mock; prod: URL instancji KLIK
+INTEGRATIONS_KLIK_API_KEY=your_klik_api_key      # klucz API od operatora KLIK
+KLIK_WEBHOOK_SECRET=changeme_klik_webhook_secret  # nagłówek X-Webhook-Secret na /klik/webhook/*
+```
+
+W środowisku deweloperskim mock KLIK (port 6006) startuje automatycznie przez docker compose
+i obsługuje zarówno C2B (kod → webhook → confirm) jak i P2P (aliasy telefoniczne).
 
 ### Konto junior
 
@@ -157,15 +207,18 @@ flowchart LR
     C --> D[Settlement natychmiastowy]
 ```
 
-### Przepływ BLIK (BPMN)
-
-> 📝 TODO (US-54) — diagram przepływu: generowanie kodu → weryfikacja → settlement RTP
+### Przepływ KLIK C2B (BPMN)
 
 ```mermaid
-%% TODO (US-54): Uzupełnić diagram BPMN przepływu BLIK
 flowchart LR
-    A[Generowanie kodu] --> B[Weryfikacja]
-    B --> C[Settlement RTP]
+    A[POST /blik/generate] --> B[KLIK codes/generate]
+    B --> C[Kod 6-cyfrowy TTL 120s]
+    C --> D[Terminal skanuje kod]
+    D --> E[KLIK → webhook /authorize]
+    E --> F[Modal Approve/Reject]
+    F --> G["POST /blik/id/approve lub /reject"]
+    G --> H[KLIK payments/confirm]
+    H --> I[Debit konta / REJECTED]
 ```
 
 ### Przepływ zatwierdzania transakcji junior (BPMN)
@@ -251,7 +304,9 @@ INTEGRATIONS_RTP_URL=http://localhost:6002
 INTEGRATIONS_FEDNOW_URL=http://localhost:6003
 INTEGRATIONS_SWIFT_URL=http://localhost:6004
 INTEGRATIONS_CARDS_URL=http://payment-gateway:8000   # adres payment-gateway w sieci Docker
-INTEGRATIONS_BLIK_URL=http://localhost:6006
+INTEGRATIONS_BLIK_URL=http://localhost:6006           # dev: mock KLIK; prod: URL instancji KLIK
+INTEGRATIONS_KLIK_API_KEY=your_klik_api_key           # klucz API KLIK — wymagany w prod
+KLIK_WEBHOOK_SECRET=dowolny_sekret                    # zabezpieczenie webhooka /klik/webhook/*
 CARDS_API_KEY=bank-key-us-a
 CARDS_HMAC_SECRET=secret-us-a-hmac
 CARDS_ADMIN_KEY=admin-secret-key-2026
@@ -307,6 +362,7 @@ Aplikacja dostępna pod:
 | API | http://localhost:5100 |
 | Swagger UI | http://localhost:5100/swagger |
 | Health check | http://localhost:5100/health |
+| Mock KLIK C2B+P2P | http://localhost:6006 |
 
 > Jeśli uruchamiasz razem z projektem **Karty-Platnicze-Aplikacje-Biznesowe**, po każdym `docker compose up` w us-bank-system musisz podłączyć kontener banku do sieci payment-gatewaya, żeby settlement działał:
 >
@@ -339,7 +395,7 @@ us-bank-system/
 │   │   └── payment-config.json       # konfiguracja sesji płatności (timeouty, okna batch)
 │   ├── UsBankSystem.Core/            # Domain entities, interfaces
 │   ├── UsBankSystem.Infrastructure/  # EF Core, repositories
-│   ├── UsBankSystem.MockGateways/    # Mock stuby ACH/RTP/FedNow/SWIFT (porty 6001-6004)
+│   ├── UsBankSystem.MockGateways/    # Mock stuby ACH/RTP/FedNow/SWIFT/KLIK (porty 6001-6004, 6006)
 │   ├── UsBankSystem.Tests/           # Testy API
 │   └── UsBankSystem.MockGateways.Tests/ # Testy mock stubów
 ├── frontend/                         # React + Vite SPA
@@ -404,6 +460,27 @@ Pełna dokumentacja dostępna przez Swagger UI pod `/swagger` po uruchomieniu ap
 | GET | /accounts/{id}/cards/{cardId}/external-status | Status karty w payment-gateway (saldo, limity) |
 | POST | /capture | Webhook od card-provider po settlement transakcji kartowej |
 
+### BLIK
+
+| Metoda | Endpoint | Opis |
+|---|---|---|
+| POST | /blik/generate | Generowanie kodu BLIK (wywołuje KLIK API) |
+| GET | /blik/pending | Lista oczekujących autoryzacji BLIK |
+| POST | /blik/{id}/approve | Zatwierdź autoryzację (debit konta, potwierdź KLIK) |
+| POST | /blik/{id}/reject | Odrzuć autoryzację BLIK |
+| GET | /blik/transactions | Historia autoryzacji BLIK |
+| POST | /klik/webhook/authorize | Webhook przychodzący z KLIK (autoryzacja płatności) |
+| POST | /klik/webhook/ping | Webhook ping od KLIK (keepalive) |
+
+### P2P (przelew na numer telefonu)
+
+| Metoda | Endpoint | Opis |
+|---|---|---|
+| GET | /accounts/{id}/phone-alias | Odczyt aktywnego aliasu telefon→konto |
+| POST | /accounts/{id}/phone-alias | Rejestracja aliasu telefonu w KLIK |
+| DELETE | /accounts/{id}/phone-alias | Usunięcie aliasu |
+| POST | /transfers/p2p | Przelew na numer telefonu (on-us lub przez FedNow) |
+
 ---
 
 ## Integracje zewnętrzne
@@ -416,7 +493,9 @@ INTEGRATIONS_RTP_URL=http://rtp-module
 INTEGRATIONS_FEDNOW_URL=http://fednow-module
 INTEGRATIONS_SWIFT_URL=http://swift-module
 INTEGRATIONS_CARDS_URL=http://cards-module
-INTEGRATIONS_BLIK_URL=http://blik-module
+INTEGRATIONS_BLIK_URL=http://klik-module      # adres KLIK API (mock: http://localhost:6006)
+INTEGRATIONS_KLIK_API_KEY=twoj_api_key        # klucz API od operatora KLIK
+KLIK_WEBHOOK_SECRET=opcjonalny_sekret         # nagłówek X-Webhook-Secret na /klik/webhook/*
 ```
 
 **mock stub** (`UsBankSystem.MockGateways`):
@@ -428,8 +507,70 @@ INTEGRATIONS_BLIK_URL=http://blik-module
 | RTP | 6002 | Mock: czeka kilka sekund i odpowiada synchronicznie `Completed` |
 | FedNow | 6003 | Mock: tak samo jak RTP |
 | SWIFT | 6004 | Mock: odpowiada natychmiast, webhook po dłuższym czasie |
+| KLIK C2B+P2P | 6006 | Mock KLIK: kody C2B (TTL 120s), symulacja terminala (`POST /simulate/initiate`), potwierdzenia z fee 1%+0.5%, aliasy P2P (register/lookup/delete) |
 
-Czasy opóźnień dla mock stubów są brane z `payment-config.json`.
+Czasy opóźnień dla mock stubów (RTP/FedNow/SWIFT) są brane z `payment-config.json`.
+
+#### Testowanie KLIK C2B z mockiem
+
+```bash
+# 1. Zaloguj się i zapisz token
+TOKEN=$(curl -s -X POST http://localhost:5100/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"john.doe@example.com","password":"Test123!"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+# 2. Wygeneruj kod BLIK (zastąp accountId ID konta z /accounts)
+curl -s -X POST http://localhost:5100/blik/generate \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"accountId":"aaaa1111-1111-1111-1111-111111111111"}'
+# → {"code":"123456","expiresAt":"...","expiresIn":119}
+
+# 3. Zasymuluj terminal — wpisz kod z poprzedniego kroku
+INIT=$(curl -s -X POST http://localhost:6006/simulate/initiate \
+  -H "Content-Type: application/json" \
+  -d '{"code":"123456","amount":25.00,"currency":"USD","merchant_name":"Coffee Corner","is_on_us":false}')
+echo $INIT
+# → {"transaction_id":"...","status":"pending"}
+
+# 4. Sprawdź oczekującą autoryzację
+curl -s http://localhost:5100/blik/pending -H "Authorization: Bearer $TOKEN"
+
+# 5. Zatwierdź (zastąp {authId} ID z kroku 4)
+curl -s -X POST http://localhost:5100/blik/{authId}/approve \
+  -H "Authorization: Bearer $TOKEN"
+# → {"status":"accepted","localTransactionId":"..."}
+
+# 6. Sprawdź status w KLIK (zastąp {txId} z INIT.transaction_id)
+curl -s http://localhost:6006/api/v1/payments/status/{txId}
+# → {"status":"COMPLETED","klik_fee":0.25,"agent_fee":0.125,"merchant_net":24.625}
+```
+
+#### Testowanie KLIK P2P z mockiem
+
+```bash
+# 1. Zarejestruj alias telefonu na koncie (numer w formacie US E.164)
+curl -s -X POST http://localhost:5100/accounts/{accountId}/phone-alias \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"phoneNumber":"+15551234567"}'
+# → {"aliasId":"...","phone":"+15551234567","registeredAt":"..."}
+
+# 2. Sprawdź zarejestrowany alias
+curl -s http://localhost:5100/accounts/{accountId}/phone-alias \
+  -H "Authorization: Bearer $TOKEN"
+
+# 3. Przelew P2P na numer telefonu (on-us — odbiorca ma konto w tym samym banku)
+curl -s -X POST http://localhost:5100/transfers/p2p \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fromAccountId":"{accountId}","phone":"+15551234567","amount":10.00,"currency":"USD","description":"test P2P"}'
+
+# 4. Usuń alias
+curl -s -X DELETE http://localhost:5100/accounts/{accountId}/phone-alias \
+  -H "Authorization: Bearer $TOKEN"
+```
 
 Żeby przełączyć się z mocka na prawdziwy moduł — zmień odpowiedni URL w `.env` na adres modułu innej grupy, np.:
 

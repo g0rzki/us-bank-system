@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using UsBankSystem.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using UsBankSystem.Infrastructure.Persistence;
 namespace UsBankSystem.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260609215732_AddBlikAuthorization")]
+    partial class AddBlikAuthorization
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -204,9 +207,6 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                         .HasMaxLength(4)
                         .HasColumnType("character varying(4)");
 
-                    b.Property<string>("MaskedPan")
-                        .HasColumnType("text");
-
                     b.Property<decimal?>("MonthlyLimit")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
@@ -253,47 +253,6 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.HasIndex("ParentUserId");
 
                     b.ToTable("JuniorAccounts");
-                });
-
-            modelBuilder.Entity("UsBankSystem.Core.Entities.PhoneAlias", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("KlikAliasId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Phone")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<DateTime>("RegisteredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)")
-                        .HasDefaultValue("active");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccountId");
-
-                    b.HasIndex("Phone", "Status");
-
-                    b.ToTable("PhoneAliases");
                 });
 
             modelBuilder.Entity("UsBankSystem.Core.Entities.Transaction", b =>
@@ -513,17 +472,6 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.Navigation("Account");
 
                     b.Navigation("ParentUser");
-                });
-
-            modelBuilder.Entity("UsBankSystem.Core.Entities.PhoneAlias", b =>
-                {
-                    b.HasOne("UsBankSystem.Core.Entities.Account", "Account")
-                        .WithMany()
-                        .HasForeignKey("AccountId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Account");
                 });
 
             modelBuilder.Entity("UsBankSystem.Core.Entities.Transaction", b =>

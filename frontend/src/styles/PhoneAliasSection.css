@@ -1,0 +1,97 @@
+.p2p-section {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    padding: var(--spacing-lg);
+    margin-top: var(--spacing-lg);
+}
+
+.p2p-section-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.p2p-section-header h2 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+    color: var(--color-text);
+}
+
+.p2p-account-select {
+    margin-bottom: var(--spacing-md);
+}
+
+.p2p-status-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.p2p-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: 4px var(--spacing-sm);
+    background: var(--color-success-bg);
+    color: var(--color-success);
+    border-radius: var(--radius-btn);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.p2p-active-phone {
+    font-size: var(--font-size-base);
+    color: var(--color-text);
+    font-weight: 500;
+}
+
+.p2p-input-row {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.p2p-input-row .db-input {
+    flex: 1;
+    min-width: 200px;
+}
+
+.p2p-phone-error {
+    color: var(--color-error);
+    font-size: var(--font-size-sm);
+    margin-top: var(--spacing-xs);
+}
+
+.p2p-hint {
+    margin-top: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+}
+
+.p2p-btn-danger {
+    height: var(--btn-height);
+    padding: 0 var(--spacing-md);
+    border: 1px solid var(--color-error);
+    border-radius: var(--radius-btn);
+    background: transparent;
+    color: var(--color-error);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.p2p-btn-danger:hover:not(:disabled) {
+    background: var(--color-error);
+    color: #fff;
+}
+
+.p2p-btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

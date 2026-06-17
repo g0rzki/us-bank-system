@@ -7,6 +7,7 @@ using UsBankSystem.Api.Extensions;
 using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Integrations.Sftp;
 using UsBankSystem.Api.Middleware;
+using UsBankSystem.Api.Services;
 using UsBankSystem.Api.Services.Polling;
 using UsBankSystem.Infrastructure.Persistence;
 
@@ -53,6 +54,15 @@ builder.Services.AddHttpClient<SwiftGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:SwiftUrl"] ?? "http://localhost:6004"));
 builder.Services.AddHttpClient<CardsGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:CardsUrl"] ?? "http://localhost:6005"));
+builder.Services.AddHttpClient<KlikApiClient>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:BlikUrl"] ?? "http://localhost:6006"));
+// Resolve IKlikApiClient via the typed-HttpClient-factory instance (not a plain Scoped)
+builder.Services.AddScoped<IKlikApiClient>(sp => sp.GetRequiredService<KlikApiClient>());
+builder.Services.AddScoped<BlikService>();
+builder.Services.AddHttpClient<KlikP2pClient>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:BlikUrl"] ?? "http://localhost:6006"));
+builder.Services.AddScoped<IKlikP2pClient>(sp => sp.GetRequiredService<KlikP2pClient>());
+builder.Services.AddScoped<PhoneAliasService>();
 
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
