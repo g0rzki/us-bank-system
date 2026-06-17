@@ -5,6 +5,7 @@ import { getPendingApprovalTransfers } from '../../../api/transfers';
 import type { PendingApprovalTransfer } from '../../../api/transfers';
 import AccountCard from '../components/AccountCard';
 import JuniorAccountList from '../components/JuniorAccountList';
+import PhoneAliasSection from '../components/PhoneAliasSection';
 import { useToast } from '../../../context/ToastContext';
 
 export default function AccountsView({ accounts, onAccountCreated }: {
@@ -113,6 +114,8 @@ export default function AccountsView({ accounts, onAccountCreated }: {
                     {accounts.map(acc => <AccountCard key={acc.id} account={acc} detailed />)}
                 </div>
             )}
+
+            <PhoneAliasSection accounts={accounts} />
 
             <div className="db-section db-mt">
                 <div className="db-section-header">
