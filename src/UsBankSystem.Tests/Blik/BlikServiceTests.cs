@@ -386,10 +386,69 @@ public class BlikServiceTests
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // Test 7: Approve — KLIK confirm fails → status becomes Failed
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Approve_KlikConfirmFails_StatusBecomesFailed()
+    {
+        var (db, userId, accountId) = await SetupUserWithAccount(balance: 200m);
+        var authId = Guid.NewGuid();
+        db.BlikAuthorizations.Add(new BlikAuthorization
+        {
+            Id = authId, KlikTransactionId = Guid.NewGuid().ToString(),
+            UserId = userId, AccountId = accountId,
+            Amount = 100m, Currency = "USD", MerchantName = "Store",
+            IsOnUs = false, Status = BlikAuthorizationStatus.Pending,
+            ExpiryTime = DateTime.UtcNow.AddSeconds(60), CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var svc = CreateService(db, new FakeKlikApiClient(confirmSuccess: false));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            svc.DecideAsync(userId, authId, accepted: true));
+
+        var auth = await db.BlikAuthorizations.FindAsync(authId);
+        Assert.Equal(BlikAuthorizationStatus.Failed, auth!.Status);
+        Assert.NotNull(auth.DecidedAt);
+
+        Assert.Equal(0, await db.Transactions.CountAsync());
+        var account = await db.Accounts.FindAsync(accountId);
+        Assert.Equal(200m, account!.Balance);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Test 8: Decide on Failed authorization — throws "not pending"
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Decide_FailedAuthorization_ThrowsNotPending()
+    {
+        var (db, userId, accountId) = await SetupUserWithAccount();
+        var authId = Guid.NewGuid();
+        db.BlikAuthorizations.Add(new BlikAuthorization
+        {
+            Id = authId, KlikTransactionId = Guid.NewGuid().ToString(),
+            UserId = userId, AccountId = accountId,
+            Amount = 50m, Currency = "USD", MerchantName = "Shop",
+            IsOnUs = false, Status = BlikAuthorizationStatus.Failed,
+            ExpiryTime = DateTime.UtcNow.AddSeconds(60), CreatedAt = DateTime.UtcNow,
+            DecidedAt = DateTime.UtcNow.AddSeconds(-5)
+        });
+        await db.SaveChangesAsync();
+
+        var svc = CreateService(db);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            svc.DecideAsync(userId, authId, accepted: true));
+        Assert.Contains("not pending", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Fake KLIK client for tests
     // ──────────────────────────────────────────────────────────────────────────
 
-    private class FakeKlikApiClient : IKlikApiClient
+    private class FakeKlikApiClient(bool confirmSuccess = true) : IKlikApiClient
     {
         public string? LastConfirmStatus { get; private set; }
         public string? LastRejectReason { get; private set; }
@@ -401,7 +460,7 @@ public class BlikServiceTests
         {
             LastConfirmStatus = accepted ? "ACCEPTED" : "REJECTED";
             LastRejectReason = rejectReason;
-            return Task.FromResult(new KlikConfirmResult(true, null));
+            return Task.FromResult(new KlikConfirmResult(confirmSuccess, confirmSuccess ? null : "KLIK error"));
         }
     }
 }

@@ -162,6 +162,9 @@ public class BlikService(AppDbContext db, IKlikApiClient klikClient, ILogger<Bli
         if (!confirmResult.Success)
         {
             logger.LogError("KLIK confirm failed for transaction {TxId}: {Error}", auth.KlikTransactionId, confirmResult.Error);
+            auth.Status = BlikAuthorizationStatus.Failed;
+            auth.DecidedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
             throw new InvalidOperationException($"KLIK confirm failed: {confirmResult.Error}");
         }
 

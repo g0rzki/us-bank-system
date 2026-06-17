@@ -611,7 +611,7 @@ public class BlikKlikContractTests
     // ──────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Approve_KlikConfirmFails_ThrowsAndLocalStateNotPersisted()
+    public async Task Approve_KlikConfirmFails_SetsFailedStatusAndNoDebit()
     {
         var (db, userId, accountId) = await SetupUser(balance: 200m);
         var authId = Guid.NewGuid();
@@ -631,10 +631,13 @@ public class BlikKlikContractTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             svc.DecideAsync(userId, authId, accepted: true));
 
-        // Brak debetu i transakcji — KLIK nie potwierdził
         Assert.Equal(0, await db.Transactions.CountAsync());
         var account = await db.Accounts.FindAsync(accountId);
         Assert.Equal(200m, account!.Balance);
+
+        var auth = await db.BlikAuthorizations.FindAsync(authId);
+        Assert.Equal(BlikAuthorizationStatus.Failed, auth!.Status);
+        Assert.NotNull(auth.DecidedAt);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
