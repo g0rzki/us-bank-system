@@ -3,8 +3,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-// KLIK C2B mock — POST /api/v1/codes/generate, POST /simulate/initiate,
-//                  POST /api/v1/payments/confirm, GET /api/v1/payments/status/{id}
+// KLIK mock — C2B: POST /api/v1/codes/generate, POST /simulate/initiate,
+//                    POST /api/v1/payments/confirm, GET /api/v1/payments/status/{id}
+//             P2P:  POST /api/v1/aliases/register, GET /api/v1/aliases/lookup/{phone},
+//                    DELETE /api/v1/aliases/{phone}
 static class KlikMockGateway
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -18,6 +20,7 @@ static class KlikMockGateway
     {
         var codes = new ConcurrentDictionary<string, CodeEntry>();
         var transactions = new ConcurrentDictionary<string, TxEntry>();
+        var aliases = new ConcurrentDictionary<string, AliasEntry>();
 
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
@@ -144,6 +147,65 @@ static class KlikMockGateway
             return Results.Ok(new { transaction_id = id, status = tx.Status, created_at = tx.CreatedAt });
         });
 
+        // POST /api/v1/aliases/register
+        app.MapPost("/api/v1/aliases/register", (HttpRequest req) =>
+        {
+            var body = ReadBody(req);
+            var request = JsonSerializer.Deserialize<AliasRegisterRequest>(body, JsonOpts);
+            if (string.IsNullOrEmpty(request?.Phone) || request.AccountIdentifier is null)
+                return Results.BadRequest(KlikError("400_INVALID_REQUEST", "phone and account_identifier are required"));
+
+            if (string.IsNullOrEmpty(request.AccountIdentifier.RoutingNumber) ||
+                string.IsNullOrEmpty(request.AccountIdentifier.AccountNumber))
+                return Results.BadRequest(KlikError("400_INVALID_ACCOUNT_IDENTIFIER", "routing_number and account_number are required"));
+
+            if (aliases.ContainsKey(request.Phone))
+                return Results.Conflict(KlikError("409_ALIAS_ALREADY_EXISTS", $"Alias for {request.Phone} already registered"));
+
+            var aliasId = Guid.NewGuid().ToString();
+            var registeredAt = DateTime.UtcNow;
+            aliases[request.Phone] = new AliasEntry(
+                aliasId, request.Phone,
+                request.AccountIdentifier.RoutingNumber,
+                request.AccountIdentifier.AccountNumber,
+                registeredAt);
+
+            logger.LogInformation("[KLIK] P2P alias registered: {Phone} → alias {AliasId}", request.Phone, aliasId);
+            return Results.Ok(new { alias_id = aliasId, phone = request.Phone, registered_at = registeredAt });
+        });
+
+        // GET /api/v1/aliases/lookup/{phone}
+        app.MapGet("/api/v1/aliases/lookup/{phone}", (string phone) =>
+        {
+            var decoded = Uri.UnescapeDataString(phone);
+            if (!aliases.TryGetValue(decoded, out var alias))
+                return Results.NotFound(KlikError("404_ALIAS_NOT_FOUND", $"No alias registered for {decoded}"));
+
+            return Results.Ok(new
+            {
+                phone = alias.Phone,
+                bank_id = "US_BANK_MOCK",
+                bank_code = "US_BANK_MOCK",
+                account_identifier = new
+                {
+                    type = "us_routing",
+                    routing_number = alias.RoutingNumber,
+                    account_number = alias.AccountNumber
+                }
+            });
+        });
+
+        // DELETE /api/v1/aliases/{phone}
+        app.MapDelete("/api/v1/aliases/{phone}", (string phone) =>
+        {
+            var decoded = Uri.UnescapeDataString(phone);
+            if (!aliases.TryRemove(decoded, out _))
+                return Results.NotFound(KlikError("404_ALIAS_NOT_FOUND", $"No alias registered for {decoded}"));
+
+            logger.LogInformation("[KLIK] P2P alias deleted: {Phone}", decoded);
+            return Results.NoContent();
+        });
+
         app.MapGet("/health", () => Results.Ok(new { channel = "KLIK", port, mode = "mock" }));
 
         return app;
@@ -187,7 +249,10 @@ static class KlikMockGateway
 
     private record CodeEntry(string UserId, DateTime ExpiresAt, bool Used);
     private record TxEntry(string Code, decimal Amount, string Currency, string MerchantName, string UserId, string Status, DateTime CreatedAt);
+    private record AliasEntry(string AliasId, string Phone, string RoutingNumber, string AccountNumber, DateTime RegisteredAt);
     private record GenerateRequest(string? UserId, string? Zone);
     private record InitiateRequest(string Code, decimal Amount, string? Currency, string? MerchantName, string? UserId, bool IsOnUs);
     private record ConfirmRequest(string? TransactionId, string Status, string? RejectReason);
+    private record AliasRegisterRequest(string? Phone, AliasAccountIdentifier? AccountIdentifier, string? Zone);
+    private record AliasAccountIdentifier(string? Type, string? RoutingNumber, string? AccountNumber);
 }
