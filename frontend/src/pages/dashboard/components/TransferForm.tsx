@@ -7,10 +7,13 @@ import {
     createFedNowTransfer,
     createSwiftTransfer,
 } from '../../../api/transfers';
+import { sendToPhone } from '../../../api/p2p';
 import { useToast } from '../../../context/ToastContext';
 import '../../../styles/TransferForm.css';
 
-type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift';
+type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift' | 'p2p';
+
+const US_PHONE_RE = /^\+1\d{10}$/;
 
 interface Props {
     accounts: Account[];
@@ -31,6 +34,7 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
     const [remittanceInfo, setRemittanceInfo] = useState('');
     const [amount, setAmount] = useState('');
     const [description, setDescription] = useState('');
+    const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
@@ -43,6 +47,7 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
         setRemittanceInfo('');
         setAmount('');
         setDescription('');
+        setPhone('');
     }, [channel]);
 
     const handleSubmit = async () => {
@@ -66,15 +71,23 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
             } else if (channel === 'swift') {
                 if (!iban || !bic || !beneficiaryName) { showToast('IBAN, BIC and beneficiary name are required'); return; }
                 await createSwiftTransfer({ fromAccountId, iban, bic, beneficiaryName, beneficiaryAddress: beneficiaryAddress || undefined, amount: amt, currency: 'USD', chargeBearer, remittanceInfo: remittanceInfo || undefined, description: description || undefined });
+            } else if (channel === 'p2p') {
+                if (!phone || !US_PHONE_RE.test(phone)) { showToast('Enter a valid US phone number in format +1XXXXXXXXXX'); return; }
+                await sendToPhone(fromAccountId, phone, amt);
             }
             setAmount('');
             setDescription('');
             setToAccountNumber('');
             setToRoutingNumber('');
+            setPhone('');
             onSuccess();
             showToast('Transfer submitted successfully', 'success');
         } catch (e: any) {
-            showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Transfer failed. Please try again.');
+            if (channel === 'p2p' && e?.response?.status === 404) {
+                showToast('Ten numer nie ma włączonego przelewu na telefon. Spróbuj przelewu na numer konta.');
+            } else {
+                showToast(e?.response?.data?.detail ?? e?.response?.data?.message ?? 'Transfer failed. Please try again.');
+            }
         } finally {
             setLoading(false);
         }
@@ -112,6 +125,17 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                             <input value={toAccountNumber} onChange={e => setToAccountNumber(e.target.value)} placeholder="Account number" />
                         </div>
                     </>
+                )}
+
+                {channel === 'p2p' && (
+                    <div className="tf-field">
+                        <label>Recipient phone number</label>
+                        <input
+                            value={phone}
+                            onChange={e => setPhone(e.target.value)}
+                            placeholder="+15551234567"
+                        />
+                    </div>
                 )}
 
                 {channel === 'swift' && (

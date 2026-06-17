@@ -7,9 +7,9 @@ import { getAccounts, getJuniorAccounts } from '../../../api/accounts';
 import type { Account } from '../../../api/accounts';
 import TransferForm from '../components/TransferForm';
 import { useToast } from '../../../context/ToastContext';
-import { Building2, Banknote, Zap, Timer, Globe } from 'lucide-react';
+import { Building2, Banknote, Zap, Timer, Globe, Smartphone } from 'lucide-react';
 
-type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift';
+type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift' | 'p2p';
 
 const CHANNEL_INFO: Record<Channel, { label: string; desc: string; settlement: string; icon: React.ReactNode }> = {
     internal: { label: 'Internal', desc: 'Between your accounts', settlement: 'Instant', icon: <Building2 size={16} /> },
@@ -17,6 +17,7 @@ const CHANNEL_INFO: Record<Channel, { label: string; desc: string; settlement: s
     rtp: { label: 'RTP', desc: 'Real-time payment', settlement: 'Instant (24/7)', icon: <Zap size={16} /> },
     fednow: { label: 'FedNow', desc: 'Instant RTGS settlement', settlement: 'Instant', icon: <Timer size={16} /> },
     swift: { label: 'SWIFT', desc: 'International wire transfer', settlement: '1–5 business days', icon: <Globe size={16} /> },
+    p2p: { label: 'P2P', desc: 'Send to phone number', settlement: 'Instant', icon: <Smartphone size={16} /> },
 };
 
 const ACTIVE_STATUSES = new Set(['pending', 'pending_approval', 'processing']);
