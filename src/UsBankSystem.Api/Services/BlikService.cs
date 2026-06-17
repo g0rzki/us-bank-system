@@ -106,7 +106,15 @@ public class BlikService(AppDbContext db, IKlikApiClient klikClient, ILogger<Bli
         };
 
         db.BlikAuthorizations.Add(authorization);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            logger.LogInformation("Concurrent duplicate webhook for transaction {TxId}, returning idempotent response", payload.TransactionId);
+            return new { received = true, will_prompt_user = true };
+        }
 
         return new { received = true, will_prompt_user = true };
     }

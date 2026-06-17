@@ -321,6 +321,71 @@ public class BlikServiceTests
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // Test: Concurrent duplicate webhook — DbUpdateException returns idempotent
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task WebhookAuthorize_DbUpdateException_ReturnsIdempotentResponse()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var opts = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+
+        var db = new ThrowOnSaveDbContext(opts);
+        var user = new User
+        {
+            Id = Guid.NewGuid(), Email = "test@example.com", PasswordHash = "hash",
+            FirstName = "Test", LastName = "User", Status = "active", CreatedAt = DateTime.UtcNow
+        };
+        var account = new Account
+        {
+            Id = Guid.NewGuid(), UserId = user.Id, AccountNumber = "1000000001",
+            Type = "checking", Balance = 500m, ReservedBalance = 0,
+            Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(user);
+        db.Accounts.Add(account);
+        db.BlikCodes.Add(new BlikCode
+        {
+            Id = Guid.NewGuid(), UserId = user.Id, AccountId = account.Id,
+            Code = "123456", Status = BlikCodeStatus.Active,
+            ExpiresAt = DateTime.UtcNow.AddSeconds(90), CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        db.ThrowOnNextSave = true;
+
+        var svc = new BlikService(db, new FakeKlikApiClient(), NullLogger<BlikService>.Instance);
+        var payload = new KlikWebhookAuthorizeRequest
+        {
+            TransactionId = Guid.NewGuid().ToString(), UserId = user.Id.ToString(),
+            Amount = 50m, Currency = "USD", MerchantName = "Shop",
+            IsOnUs = false, ExpiryTime = DateTime.UtcNow.AddSeconds(60), Zone = "US"
+        };
+
+        var result = await svc.HandleAuthorizeWebhookAsync(payload);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(result);
+        Assert.Contains("\"received\":true", json);
+        Assert.Contains("\"will_prompt_user\":true", json);
+    }
+
+    private class ThrowOnSaveDbContext(DbContextOptions<AppDbContext> opts) : AppDbContext(opts)
+    {
+        public bool ThrowOnNextSave { get; set; }
+
+        public override Task<int> SaveChangesAsync(CancellationToken ct = default)
+        {
+            if (ThrowOnNextSave)
+            {
+                ThrowOnNextSave = false;
+                throw new DbUpdateException("Unique constraint violation");
+            }
+            return base.SaveChangesAsync(ct);
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Fake KLIK client for tests
     // ──────────────────────────────────────────────────────────────────────────
 
