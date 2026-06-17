@@ -178,7 +178,7 @@ flowchart LR
     C --> D[Terminal skanuje kod]
     D --> E[KLIK → webhook /authorize]
     E --> F[Modal Approve/Reject]
-    F --> G[POST /blik/id/approve|reject]
+    F --> G["POST /blik/id/approve lub /reject"]
     G --> H[KLIK payments/confirm]
     H --> I[Debit konta / REJECTED]
 ```
