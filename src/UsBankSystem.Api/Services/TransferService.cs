@@ -226,6 +226,12 @@ public class TransferService(AppDbContext db)
             transfer.FromAccount.ReservedBalance -= transfer.Amount;
             transfer.Status = TransferStatus.Failed;
         }
+        else if (status == TransferStatus.Rejected)
+        {
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            transfer.Status = TransferStatus.Rejected;
+            transfer.RejectedAt = DateTime.UtcNow;
+        }
         else
         {
             throw new ArgumentException($"Invalid status '{status}'");

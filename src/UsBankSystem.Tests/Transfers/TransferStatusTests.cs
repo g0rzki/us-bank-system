@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Integrations;
+using UsBankSystem.Api.Integrations.FedNow;
 using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
@@ -44,7 +45,7 @@ public class TransferStatusTests
         {
             Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
             Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
-            FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
+            FedNow = new FedNowConfig { TimeoutSeconds = 10, PollIntervalSeconds = 1, BankRtn = "040104018", BankLegalName = "Baguette Bank" }
         });
 
     private TransfersController CreateController(AppDbContext db, Guid userId)
@@ -57,10 +58,10 @@ public class TransferStatusTests
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6002") },
             NullLogger<RtpGateway>.Instance);
-        var fedNowGateway = new FedNowGateway(
-            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
-                { BaseAddress = new Uri("http://localhost:6003") },
-            NullLogger<FedNowGateway>.Instance);
+        var mqGateway = new FedNowMqGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"status":"sent"}"""))
+                { BaseAddress = new Uri("http://localhost:8770") },
+            NullLogger<FedNowMqGateway>.Instance);
         var swiftGateway = new SwiftGateway(
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6004") },
@@ -69,7 +70,7 @@ public class TransferStatusTests
         var internalPayment = new InternalPaymentService(db);
         var achPayment = new AchPaymentService(db, achGateway, CreatePaymentConfig());
         var rtpPayment = new RtpPaymentService(db, rtpGateway, CreatePaymentConfig());
-        var fedNowPayment = new FedNowPaymentService(db, fedNowGateway, CreatePaymentConfig());
+        var fedNowPayment = new FedNowPaymentService(db, mqGateway, new Pacs008Builder(), CreatePaymentConfig());
         var swiftPayment = new SwiftPaymentService(db, swiftGateway, CreatePaymentConfig());
         var transferService = new TransferService(db);
         var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
