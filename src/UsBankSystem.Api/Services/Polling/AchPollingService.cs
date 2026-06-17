@@ -46,14 +46,15 @@ public class AchPollingService(
             var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length < 2)
             {
-                logger.LogWarning("ACH ack {File}: unexpected format ({Lines} lines), skipping finalization", fileName, lines.Length);
+                logger.LogWarning("ACH ack {File}: unexpected format ({Lines} lines), deleting to avoid retry loop", fileName, lines.Length);
+                try { await sftp.DeleteAsync($"outbound/{fileName}", ct); }
+                catch (Exception ex) { logger.LogError(ex, "ACH ack {File}: malformed and could not delete from SFTP", fileName); }
                 return;
             }
 
-            // FedSystems ACK format: lines[0] = file header, lines[1] (1-indexed "line 2") = status.
-            // Status line starting with "R," means Rejected; anything else means Accepted.
-            // Verify against the actual ACK spec if format changes — index 1 is the assumption here.
-            var isAccepted = !lines[1].StartsWith("R,", StringComparison.Ordinal);
+            // FedSystems ACK format: lines[0] = file header, lines[1] = status.
+            // "R," prefix = Record accepted (format valid); "E," prefix = Error (rejected).
+            var isAccepted = lines[1].StartsWith("R,", StringComparison.Ordinal);
 
             // Filename is {fileId}.ack — fileId is stored as ExternalReferenceId
             var fileId = Path.GetFileNameWithoutExtension(fileName);
@@ -62,7 +63,7 @@ public class AchPollingService(
             try { await sftp.DeleteAsync($"outbound/{fileName}", ct); }
             catch (Exception ex) { logger.LogError(ex, "ACH ack {File} processed but SFTP delete failed — will retry next poll", fileName); }
 
-            logger.LogInformation("ACH ack {File}: {Result}", fileName, isAccepted ? "accepted" : "rejected");
+            logger.LogInformation("ACH ack {File}: {Result} (status line: {StatusLine})", fileName, isAccepted ? "accepted" : "rejected", lines[1]);
         }
         catch (Exception ex)
         {
@@ -115,7 +116,7 @@ public class AchPollingService(
                 if (content is null) continue;
 
                 var text = System.Text.Encoding.UTF8.GetString(content);
-                entries.AddRange(ParseIncomingAch(text, ourDfiId, fileName));
+                entries.AddRange(ParseIncomingAch(text, ourDfiId, fileName, logger));
                 downloadedFiles.Add(fileName);
             }
             catch (Exception ex)
@@ -138,8 +139,11 @@ public class AchPollingService(
 
     // 22 = checking credit, 32 = savings credit (live entries only; prenotes 23/33 excluded)
     private static readonly HashSet<string> CreditCodes = ["22", "32"];
+    // Debit codes — not yet handled; logged as warnings so they don't silently vanish
+    private static readonly HashSet<string> DebitCodes = ["27", "28", "37", "38"];
 
-    private static IEnumerable<IncomingTransferProcessor.IncomingEntry> ParseIncomingAch(string text, string ourDfiId, string fileName)
+    private static IEnumerable<IncomingTransferProcessor.IncomingEntry> ParseIncomingAch(
+        string text, string ourDfiId, string fileName, ILogger logger)
     {
         // NACHA fixed-width format, 94-char lines
         // Entry detail: pos 1='6', pos 2-3=tx code, pos 4-11=RDFI routing, pos 12=check digit,
@@ -152,10 +156,19 @@ public class AchPollingService(
             if (line[0] != '6') continue;
 
             var txCode = line.Substring(1, 2);
-            if (!CreditCodes.Contains(txCode)) continue;
-
             var rdfi = line.Substring(3, 8);
+
             if (!rdfi.Equals(ourDfiId, StringComparison.Ordinal)) continue;
+
+            if (DebitCodes.Contains(txCode))
+            {
+                logger.LogWarning(
+                    "ACH {File}: debit entry (code {TxCode}) for our RDFI not yet handled — account {Account}, raw amount {Amount}",
+                    fileName, txCode, line.Substring(12, 17).Trim(), line.Substring(29, 10).Trim());
+                continue;
+            }
+
+            if (!CreditCodes.Contains(txCode)) continue;
 
             var accountNumber = line.Substring(12, 17).Trim();
             var amountStr = line.Substring(29, 10);

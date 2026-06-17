@@ -53,6 +53,11 @@ ACH to sieć rozliczeniowa obsługiwana przez **NACHA** (National Automated Clea
 - RTN Fed Reserve Bank: `090000515`
 - `trace_number`: `{RTN[..8]}{seq:D7}` — unikalny w skali dnia, generowany z DB-backed counter
 
+**Znane ograniczenia:**
+- `.ack` od FedSystems potwierdza tylko poprawność formatu pliku — nie jest to potwierdzenie rozliczenia. Faktyczne rozliczenie następuje po ~3 dniach roboczych bez oddzielnego callbacku. Aktualnie pozytywny `.ack` oznacza transfer jako `Completed`; docelowo wymagany jest osobny job rozliczeniowy.
+- Prenoty (kody NACHA `23`/`33`) są pomijane — FedSystems może je wysyłać jako weryfikację konta przed prawdziwym przelewem. Aktualnie lądują jako niezidentyfikowane linie w logach.
+- Debety przychodzące (`27`/`28`/`37`/`38`) logowane jako `LogWarning`, ale nie są księgowane — wymagają osobnej obsługi.
+
 ### RTP (Real-Time Payments)
 > 📝 TODO (US-57) — opis mechanizmu, rozliczenie natychmiastowe 24/7, rola The Clearing House
 

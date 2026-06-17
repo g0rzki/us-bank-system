@@ -541,6 +541,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"USD\",\"description\":\"ACH test\"
 }")
 if $ACH_E2E; then
@@ -556,6 +557,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_SAVINGS}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"111222333\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":25.00,\"currency\":\"USD\",\"description\":\"ACH savings\"
 }")
 if $ACH_E2E; then
@@ -569,6 +571,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"111222333\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":0.01,\"currency\":\"USD\"
 }")
 if $ACH_E2E; then
@@ -582,6 +585,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"555666777\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":5.00,\"currency\":\"USD\"
 }")
 if $ACH_E2E; then
@@ -595,6 +599,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"555666777\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":5.00,\"currency\":\"USD\",
   \"description\":\"Bardzo długi opis przekraczający 22 znaki NACHA\"
 }")
@@ -610,6 +615,7 @@ if [ -n "$TOKEN_EMMA" ]; then
     \"fromAccountId\":\"${JUNIOR_ACC_1}\",
     \"toRoutingNumber\":\"021000021\",
     \"toAccountNumber\":\"987654321\",
+    \"recipientName\":\"Jane Doe\",
     \"amount\":1.00,\"currency\":\"USD\",\"description\":\"Junior ACH\"
   }")
   check "POST /transfers/ach — junior → pending_approval (201, bez SFTP)" 201 "$(status "$R")" "$(body "$R")"
@@ -623,6 +629,7 @@ fi
 R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"USD\"
 }")
 check "POST /transfers/ach — brak toRoutingNumber → 400" 400 "$(status "$R")"
@@ -630,6 +637,7 @@ check "POST /transfers/ach — brak toRoutingNumber → 400" 400 "$(status "$R")
 R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"USD\"
 }")
 check "POST /transfers/ach — brak toAccountNumber → 400" 400 "$(status "$R")"
@@ -637,6 +645,7 @@ check "POST /transfers/ach — brak toAccountNumber → 400" 400 "$(status "$R")
 R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"USD\"
 }")
 check_any "POST /transfers/ach — brak fromAccountId → 400 lub 404" "400|404" "$(status "$R")"
@@ -645,6 +654,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"currency\":\"USD\"
 }")
 check "POST /transfers/ach — brak amount → 400" 400 "$(status "$R")"
@@ -653,6 +663,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":0,\"currency\":\"USD\"
 }")
 check "POST /transfers/ach — amount = 0 → 400" 400 "$(status "$R")"
@@ -661,6 +672,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":-10.00,\"currency\":\"USD\"
 }")
 check "POST /transfers/ach — ujemna kwota → 400" 400 "$(status "$R")"
@@ -669,6 +681,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":0.001,\"currency\":\"USD\"
 }")
 check "POST /transfers/ach — amount=0.001 (poniżej minimum) → 400" 400 "$(status "$R")"
@@ -679,6 +692,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"GBP\"
 }")
 check "POST /transfers/ach — waluta GBP → 400" 400 "$(status "$R")"
@@ -687,6 +701,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"EUR\"
 }")
 check "POST /transfers/ach — waluta EUR → 400" 400 "$(status "$R")"
@@ -695,6 +710,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"\"
 }")
 check "POST /transfers/ach — pusta waluta → 400" 400 "$(status "$R")"
@@ -705,6 +721,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_BOB}" -d "{
   \"fromAccountId\":\"${BOB_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":99999.00,\"currency\":\"USD\"
 }")
 check "POST /transfers/ach — brak środków → 400" 400 "$(status "$R")"
@@ -713,6 +730,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"00000000-0000-0000-0000-000000000000\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"USD\"
 }")
 check "POST /transfers/ach — fromAccountId nie istnieje → 404" 404 "$(status "$R")"
@@ -721,6 +739,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JANE_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"USD\"
 }")
 check "POST /transfers/ach — cudze fromAccountId → 404" 404 "$(status "$R")"
@@ -729,6 +748,7 @@ R=$(req POST /transfers/ach -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toRoutingNumber\":\"021000021\",
   \"toAccountNumber\":\"987654321\",
+  \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"USD\"
 }")
 check "POST /transfers/ach — brak tokenu → 401" 401 "$(status "$R")"
