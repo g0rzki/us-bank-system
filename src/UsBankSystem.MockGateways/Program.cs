@@ -16,6 +16,9 @@ var apps = new[]
     // Sync: waits, then responds with completed/failed
     SyncGateway.Build("RTP",     6002, config.RtpDelaySeconds),
     SyncGateway.Build("FEDNOW",  6003, config.FedNowDelaySeconds),
+
+    // KLIK C2B mock: code generation, agent simulation, payment confirm
+    KlikMockGateway.Build(6006, config.ApiUrl, config.KlikWebhookSecret),
 };
 
 await Task.WhenAll(apps.Select(a => a.RunAsync(cts.Token)));

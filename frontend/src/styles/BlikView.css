@@ -1,0 +1,78 @@
+.blik-generate-card {
+    padding: var(--spacing-lg) var(--spacing-xl);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-lg);
+}
+
+.blik-account-field {
+    width: 100%;
+    max-width: 360px;
+}
+
+.blik-code-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.blik-ring-wrap {
+    position: relative;
+    width: 120px;
+    height: 120px;
+}
+
+.blik-ring {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.blik-ring-bg {
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 6;
+}
+
+.blik-ring-fg {
+    fill: none;
+    stroke: var(--color-primary);
+    stroke-width: 6;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s linear;
+}
+
+.blik-ring-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.blik-code {
+    font-size: 2.5rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+    text-align: center;
+}
+
+/* BLIK history status badges */
+.db-tx-status.accepted {
+    color: var(--color-success);
+}
+
+.db-tx-status.rejected {
+    color: var(--color-error);
+}
+
+.db-tx-status.timeout {
+    color: var(--color-text-muted);
+}

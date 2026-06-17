@@ -8,9 +8,11 @@ services:
       - "6002:6002"
       - "6003:6003"
       - "6004:6004"
+      - "6006:6006"
     environment:
       - API_URL=http://api:8080
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - KLIK_WEBHOOK_SECRET=${KLIK_WEBHOOK_SECRET}
     restart: unless-stopped
 
   api:
@@ -35,7 +37,10 @@ services:
       - Integrations__FedNowUrl=http://mock-gateways:6003
       - Integrations__SwiftUrl=http://mock-gateways:6004
       - Integrations__CardsUrl=${INTEGRATIONS_CARDS_URL}
-      - Integrations__BlikUrl=${INTEGRATIONS_BLIK_URL}
+      - Integrations__BlikUrl=${INTEGRATIONS_BLIK_URL:-http://mock-gateways:6006}
+      - Integrations__KlikApiKey=dev-key
+      - Klik__WebhookSecret=${KLIK_WEBHOOK_SECRET}
+      - Klik__AllowUnsignedWebhooks=${KLIK_ALLOW_UNSIGNED_WEBHOOKS:-false}
       - Cards__ApiKey=${CARDS_API_KEY}
       - Cards__HmacSecret=${CARDS_HMAC_SECRET}
       - Cards__AdminKey=${CARDS_ADMIN_KEY}
