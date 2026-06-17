@@ -16,7 +16,7 @@ static class KlikMockGateway
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public static WebApplication Build(int port, string bankWebhookUrl)
+    public static WebApplication Build(int port, string bankWebhookUrl, string klikWebhookSecret = "")
     {
         var codes = new ConcurrentDictionary<string, CodeEntry>();
         var transactions = new ConcurrentDictionary<string, TxEntry>();
@@ -97,6 +97,8 @@ static class KlikMockGateway
                     {
                         Content = new StringContent(json, Encoding.UTF8, "application/json")
                     };
+                    if (!string.IsNullOrEmpty(klikWebhookSecret))
+                        httpReq.Headers.TryAddWithoutValidation("X-Webhook-Secret", klikWebhookSecret);
                     var resp = await webhookClient.SendAsync(httpReq);
                     logger.LogInformation("[KLIK] Webhook authorize → {Status}", resp.StatusCode);
                 }

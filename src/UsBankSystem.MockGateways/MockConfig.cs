@@ -4,6 +4,7 @@ class MockConfig
 {
     public string ApiUrl { get; init; } = "http://localhost:5100";
     public string WebhookSecret { get; init; } = "";
+    public string KlikWebhookSecret { get; init; } = "";
 
     // Delay before webhook fires (ACH simulates batch window, SWIFT simulates settlement)
     public int AchDelaySeconds { get; init; } = 10;
@@ -17,6 +18,7 @@ class MockConfig
     {
         var apiUrl = Environment.GetEnvironmentVariable("API_URL") ?? "http://localhost:5100";
         var webhookSecret = Environment.GetEnvironmentVariable("WEBHOOK_SECRET") ?? "";
+        var klikWebhookSecret = Environment.GetEnvironmentVariable("KLIK_WEBHOOK_SECRET") ?? "";
 
         var configPath = Environment.GetEnvironmentVariable("PAYMENT_CONFIG_PATH")
             ?? Path.Combine(AppContext.BaseDirectory, "payment-config.json");
@@ -49,6 +51,7 @@ class MockConfig
         {
             ApiUrl = apiUrl,
             WebhookSecret = webhookSecret,
+            KlikWebhookSecret = klikWebhookSecret,
             AchDelaySeconds = achDelay,
             SwiftDelaySeconds = swiftDelay,
             RtpDelaySeconds = rtpDelay,

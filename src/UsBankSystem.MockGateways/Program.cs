@@ -18,7 +18,7 @@ var apps = new[]
     SyncGateway.Build("FEDNOW",  6003, config.FedNowDelaySeconds),
 
     // KLIK C2B mock: code generation, agent simulation, payment confirm
-    KlikMockGateway.Build(6006, config.ApiUrl),
+    KlikMockGateway.Build(6006, config.ApiUrl, config.KlikWebhookSecret),
 };
 
 await Task.WhenAll(apps.Select(a => a.RunAsync(cts.Token)));
