@@ -369,7 +369,6 @@ public class FedNowPollingService(
             return;
         }
 
-        await db.SaveChangesAsync(ct);
         logger.LogInformation("FedNow: pain.013 processed, pacs.008 sent for EndToEndId '{EndToEndId}', transfer {TransferId} pending",
             incoming.EndToEndId, transfer.Id);
     }

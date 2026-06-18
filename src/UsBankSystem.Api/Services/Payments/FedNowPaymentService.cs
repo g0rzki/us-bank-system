@@ -25,9 +25,6 @@ public class FedNowPaymentService(
 
         var fromAccount = await ResolveFromAccountAsync(userId, request.FromAccountId);
 
-        if (fromAccount.Id == Guid.Empty)
-            throw new ArgumentException("Invalid source account");
-
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
             throw new ArgumentException("Insufficient funds");
