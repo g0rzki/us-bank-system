@@ -167,7 +167,7 @@ public class PhoneAliasService(
             DebtorBankRtn: config.BankRtn,
             DebtorName: senderName,
             DebtorAccountNumber: account.AccountNumber,
-            CreditorBankName: "Unknown",
+            CreditorBankName: "Unknown Bank",
             CreditorBankRtn: lookup.RoutingNumber ?? string.Empty,
             CreditorName: "Unknown",
             CreditorAccountNumber: lookup.AccountNumber ?? string.Empty,
