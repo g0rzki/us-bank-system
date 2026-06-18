@@ -40,6 +40,7 @@ public class FedNowPollingService(
                 if (xmlBytes is not null)
                 {
                     await ProcessMessageAsync(xmlBytes, stoppingToken);
+                    continue;
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
