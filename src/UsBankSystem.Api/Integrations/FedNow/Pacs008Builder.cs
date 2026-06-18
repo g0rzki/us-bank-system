@@ -44,6 +44,7 @@ public class Pacs008Builder
                         new XElement(Ns + "DbtrAgt",
                             new XElement(Ns + "FinInstnId",
                                 new XElement(Ns + "ClrSysMmbId",
+                                    // lowercase "nm" per partner XSD (ClrSysMmbId/nm), not ISO "Nm" (used in Dbtr/Cdtr)
                                     new XElement(Ns + "nm", data.DebtorBankName),
                                     new XElement(Ns + "MmbId", data.DebtorBankRtn)
                                 )
