@@ -55,7 +55,7 @@ public class FedNowPollingService(
         }
     }
 
-    private async Task ProcessMessageAsync(byte[] xmlBytes, CancellationToken ct)
+    internal async Task ProcessMessageAsync(byte[] xmlBytes, CancellationToken ct)
     {
         var xml = Encoding.UTF8.GetString(xmlBytes);
 
@@ -309,9 +309,13 @@ public class FedNowPollingService(
             return;
         }
 
-        // pain.014 confirms receipt of payment request (pain.013), NOT settlement.
-        // Does not change transfer status or book funds.
-        await SendPain014ResponseAsync(incoming, "ACCP", ct);
+        if (debtorAccount.User is null)
+        {
+            logger.LogWarning("FedNow: pain.013 debtor account '{AccountNumber}' has no associated user. Sending RJCT pain.014",
+                incoming.DebtorAccountNumber);
+            await SendPain014ResponseAsync(incoming, "RJCT", ct);
+            return;
+        }
 
         debtorAccount.ReservedBalance += incoming.Amount;
 
@@ -333,6 +337,8 @@ public class FedNowPollingService(
         };
         db.Transfers.Add(transfer);
         await db.SaveChangesAsync(ct);
+
+        await SendPain014ResponseAsync(incoming, "ACCP", ct);
 
         var senderName = $"{debtorAccount.User.FirstName} {debtorAccount.User.LastName}";
 
