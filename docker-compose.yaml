@@ -44,14 +44,19 @@ services:
       - Cards__ApiKey=${CARDS_API_KEY}
       - Cards__HmacSecret=${CARDS_HMAC_SECRET}
       - Cards__AdminKey=${CARDS_ADMIN_KEY}
+      - Ach__Sftp__PrivateKeyPath=/sftp_keys/id_rsa
+    volumes:
+      - ../payment-settlement-systems/FedSystems/SFTP_Keys/us-bank-a:/sftp_keys:ro
     depends_on:
       db:
         condition: service_healthy
       mock-gateways:
         condition: service_started
     networks:
-      - default
-      - cards-backend
+      default: {}
+      clearing-us-a-karty:
+        aliases:
+          - us-bank-a
     restart: unless-stopped
 
   frontend:
@@ -87,8 +92,8 @@ volumes:
   pgdata:
 
 networks:
-  cards-backend:
-    # Zewnętrzna sieć z jawnym name: cards-backend w Karty-Platnicze-Aplikacje-Biznesowe.
+  clearing-us-a-karty:
+    # Zewnętrzna sieć tworzona przez Karty-Platnicze-Aplikacje-Biznesowe.
     # Hostuje card-provider (/capture) i payment-gateway (Integrations__CardsUrl).
-    # Uruchom tamten projekt pierwszy: docker compose -p karty up -d
+    # Uruchom tamten projekt pierwszy, żeby sieć istniała przed startem tego compose.
     external: true
