@@ -368,7 +368,8 @@ public class FedNowPollingService(
             transfer.Status = TransferStatus.Failed;
             debtorAccount.ReservedBalance -= incoming.Amount;
             await db.SaveChangesAsync(ct);
-            logger.LogWarning("FedNow: failed to send pacs.008 for pain.013 EndToEndId '{EndToEndId}': {Error}",
+            await SendPain014ResponseAsync(incoming, "RJCT", mqGateway, ct);
+            logger.LogWarning("FedNow: failed to send pacs.008 for pain.013 EndToEndId '{EndToEndId}': {Error}. Sent pain.014 RJCT to compensate prior ACCP",
                 incoming.EndToEndId, error);
             return;
         }

@@ -152,6 +152,32 @@ public class Pain013HandlingTests
         """;
 
     [Fact]
+    public async Task HandlePain013_Pacs008Fails_SetsFailedAndReleasesReserve()
+    {
+        var options = CreateDbOptions();
+        using var setupDb = CreateDb(options);
+        var user = new User { Id = Guid.NewGuid(), Email = "debtor@example.com", PasswordHash = "hash", FirstName = "Teto", LastName = "Debtor", Status = "active", CreatedAt = DateTime.UtcNow };
+        setupDb.Users.Add(user);
+        var account = new Account { Id = Guid.NewGuid(), UserId = user.Id, AccountNumber = "123456789012", Type = "checking", Balance = 500m, ReservedBalance = 0m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow };
+        setupDb.Accounts.Add(account);
+        await setupDb.SaveChangesAsync();
+
+        var service = CreateService(options, HttpStatusCode.InternalServerError);
+        var xml = string.Format(Pain013Template, account.AccountNumber);
+
+        await service.ProcessMessageAsync(Encoding.UTF8.GetBytes(xml), CancellationToken.None);
+
+        using var assertDb = CreateDb(options);
+        var transfer = await assertDb.Transfers.FirstOrDefaultAsync();
+        Assert.NotNull(transfer);
+        Assert.Equal("failed", transfer.Status);
+
+        var reloaded = await assertDb.Accounts.FindAsync(account.Id);
+        Assert.Equal(500m, reloaded!.Balance);
+        Assert.Equal(0m, reloaded.ReservedBalance);
+    }
+
+    [Fact]
     public async Task HandleIncomingPacs008_SetsCorrectDirection()
     {
         var options = CreateDbOptions();
