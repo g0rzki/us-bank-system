@@ -46,7 +46,7 @@ public class ApproveRejectTransferTests
             Swift = new SwiftConfig { TimeoutSeconds = 10 }
         });
 
-    private TransfersController CreateController(AppDbContext db, Guid userId)
+    private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode mqStatus = HttpStatusCode.OK)
     {
         var achGateway = new AchGateway(
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"referenceId":"REF-001"}"""))
@@ -57,7 +57,7 @@ public class ApproveRejectTransferTests
                 { BaseAddress = new Uri("http://localhost:6002") },
             NullLogger<RtpGateway>.Instance);
         var mqGateway = new FedNowMqGateway(
-            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"status":"sent"}"""))
+            new HttpClient(new MockHttpMessageHandler(mqStatus, """{"status":"sent"}"""))
                 { BaseAddress = new Uri("http://localhost:8770") },
             NullLogger<FedNowMqGateway>.Instance);
         var swiftGateway = new SwiftGateway(
@@ -70,7 +70,7 @@ public class ApproveRejectTransferTests
         var rtpPayment = new RtpPaymentService(db, rtpGateway, CreatePaymentConfig());
         var fedNowPayment = new FedNowPaymentService(db, mqGateway, new Pacs008Builder(), CreatePaymentConfig());
         var swiftPayment = new SwiftPaymentService(db, swiftGateway, CreatePaymentConfig());
-        var transferService = new TransferService(db);
+        var transferService = new TransferService(db, mqGateway, new Pacs008Builder(), CreatePaymentConfig());
         var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
@@ -242,6 +242,80 @@ public class ApproveRejectTransferTests
         await controller.Reject(transferId);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => controller.Reject(transferId));
+    }
+
+    private async Task<(AppDbContext db, Guid parentUserId, Guid juniorAccountId, Guid transferId)> SetupFedNow()
+    {
+        var db = CreateDb();
+
+        var parentUser = new User { Id = Guid.NewGuid(), Email = "parent@example.com", PasswordHash = "hash", FirstName = "Parent", LastName = "User", Status = "active", CreatedAt = DateTime.UtcNow };
+        db.Users.Add(parentUser);
+
+        var juniorAccount = new Account { Id = Guid.NewGuid(), UserId = parentUser.Id, AccountNumber = "2000000001", Type = "checking", Balance = 100m, ReservedBalance = 30m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow };
+        db.Accounts.Add(juniorAccount);
+
+        db.JuniorAccounts.Add(new JuniorAccount { Id = Guid.NewGuid(), AccountId = juniorAccount.Id, ParentUserId = parentUser.Id, DateOfBirth = new DateOnly(2015, 6, 15), CreatedAt = DateTime.UtcNow });
+
+        var transfer = new Transfer
+        {
+            Id = Guid.NewGuid(),
+            FromAccountId = juniorAccount.Id,
+            ToAccountId = null,
+            ToAccountNumber = "333999333999",
+            ToRoutingNumber = "010101012",
+            RecipientName = "Miku",
+            Amount = 30m,
+            Currency = "USD",
+            Channel = TransferChannel.FedNow,
+            Status = TransferStatus.PendingApproval,
+            RequiresApproval = true,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.Transfers.Add(transfer);
+
+        await db.SaveChangesAsync();
+        return (db, parentUser.Id, juniorAccount.Id, transfer.Id);
+    }
+
+    [Fact]
+    public async Task Approve_FedNow_SetsPendingAndSendsPacs008()
+    {
+        var (db, parentUserId, juniorAccountId, transferId) = await SetupFedNow();
+        var controller = CreateController(db, parentUserId);
+
+        var result = await controller.Approve(transferId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<TransferResponse>(ok.Value);
+        Assert.Equal(TransferStatus.Pending, response.Status);
+
+        var transfer = await db.Transfers.FindAsync(transferId);
+        Assert.NotNull(transfer!.ExternalReferenceId);
+        Assert.Equal(parentUserId, transfer.ApprovedBy);
+        Assert.NotNull(transfer.ApprovedAt);
+
+        var junior = await db.Accounts.FindAsync(juniorAccountId);
+        Assert.Equal(100m, junior!.Balance);
+        Assert.Equal(30m, junior.ReservedBalance);
+
+        Assert.Equal(0, await db.Transactions.CountAsync());
+    }
+
+    [Fact]
+    public async Task Approve_FedNow_MqFails_SetsFailedAndReleasesReserve()
+    {
+        var (db, parentUserId, juniorAccountId, transferId) = await SetupFedNow();
+        var controller = CreateController(db, parentUserId, HttpStatusCode.InternalServerError);
+
+        var result = await controller.Approve(transferId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<TransferResponse>(ok.Value);
+        Assert.Equal(TransferStatus.Failed, response.Status);
+
+        var junior = await db.Accounts.FindAsync(juniorAccountId);
+        Assert.Equal(100m, junior!.Balance);
+        Assert.Equal(0m, junior.ReservedBalance);
     }
 }
 

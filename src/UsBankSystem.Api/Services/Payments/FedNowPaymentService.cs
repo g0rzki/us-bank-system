@@ -33,7 +33,8 @@ public class FedNowPaymentService(
             throw new ArgumentException("Insufficient funds");
 
         if (await IsJuniorInitiatedAsync(userId, fromAccount.Id))
-            return await CreatePendingApprovalAsync(fromAccount, null, request.Amount, request.Currency, TransferChannel.FedNow, request.Description);
+            return await CreatePendingApprovalAsync(fromAccount, null, request.Amount, request.Currency, TransferChannel.FedNow, request.Description,
+                request.ToAccountNumber, request.ToRoutingNumber, request.RecipientName);
 
         fromAccount.ReservedBalance += request.Amount;
 

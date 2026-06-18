@@ -1,4 +1,8 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using UsBankSystem.Api.Configuration;
+using UsBankSystem.Api.Integrations.FedNow;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services.Payments;
 using UsBankSystem.Core.Domain.Transactions;
@@ -9,7 +13,11 @@ using Transfer = UsBankSystem.Core.Entities.Transfer;
 
 namespace UsBankSystem.Api.Services;
 
-public class TransferService(AppDbContext db)
+public class TransferService(
+    AppDbContext db,
+    FedNowMqGateway mqGateway,
+    Pacs008Builder pacs008Builder,
+    IOptions<PaymentSessionConfig> paymentConfig)
 {
     public async Task<List<TransferResponse>> GetAllAsync(Guid userId)
     {
@@ -101,6 +109,9 @@ public class TransferService(AppDbContext db)
         if (availableBalance < transfer.Amount)
             throw new InvalidOperationException("Insufficient funds");
 
+        if (transfer.Channel == TransferChannel.FedNow)
+            return await ApproveFedNowAsync(transfer, userId);
+
         transfer.FromAccount.Balance -= transfer.Amount;
         transfer.FromAccount.ReservedBalance -= transfer.Amount;
         if (transfer.ToAccount is not null)
@@ -111,8 +122,9 @@ public class TransferService(AppDbContext db)
         transfer.ApprovedAt = DateTime.UtcNow;
         transfer.CompletedAt = DateTime.UtcNow;
 
-        db.Transactions.AddRange(
-            new Transaction
+        var transactions = new List<Transaction>
+        {
+            new()
             {
                 Id = Guid.NewGuid(),
                 AccountId = transfer.FromAccountId,
@@ -122,19 +134,25 @@ public class TransferService(AppDbContext db)
                 Description = transfer.Description ?? "Junior transfer",
                 ReferenceId = transfer.Id.ToString(),
                 CreatedAt = DateTime.UtcNow
-            },
-            new Transaction
+            }
+        };
+
+        if (transfer.ToAccountId.HasValue)
+        {
+            transactions.Add(new Transaction
             {
                 Id = Guid.NewGuid(),
-                AccountId = transfer.ToAccountId!.Value,
+                AccountId = transfer.ToAccountId.Value,
                 Amount = transfer.Amount,
                 Type = TransactionType.Credit,
                 Status = TransactionStatus.Completed,
                 Description = transfer.Description ?? "Junior transfer",
                 ReferenceId = transfer.Id.ToString(),
                 CreatedAt = DateTime.UtcNow
-            }
-        );
+            });
+        }
+
+        db.Transactions.AddRange(transactions);
 
         await db.SaveChangesAsync();
         return PaymentServiceBase.MapToResponse(transfer);
@@ -238,5 +256,51 @@ public class TransferService(AppDbContext db)
         }
 
         await db.SaveChangesAsync();
+    }
+
+    private async Task<TransferResponse> ApproveFedNowAsync(Transfer transfer, Guid userId)
+    {
+        var config = paymentConfig.Value.FedNow;
+
+        transfer.ApprovedBy = userId;
+        transfer.ApprovedAt = DateTime.UtcNow;
+
+        var accountOwner = await db.Users.FirstOrDefaultAsync(u => u.Id == transfer.FromAccount.UserId);
+        var senderName = accountOwner is not null ? $"{accountOwner.FirstName} {accountOwner.LastName}" : "Unknown";
+
+        var msgId = $"MSG-{DateTime.UtcNow:yyyyMMdd}-{transfer.Id:N}";
+        var endToEndId = $"E2E-{transfer.Id:N}";
+
+        var pacs008Xml = pacs008Builder.Build(new Pacs008Data(
+            MsgId: msgId,
+            EndToEndId: endToEndId,
+            Amount: transfer.Amount,
+            Currency: transfer.Currency,
+            DebtorBankName: config.BankLegalName,
+            DebtorBankRtn: config.BankRtn,
+            DebtorName: senderName,
+            DebtorAccountNumber: transfer.FromAccount.AccountNumber,
+            CreditorBankName: transfer.RecipientName ?? "Unknown",
+            CreditorBankRtn: transfer.ToRoutingNumber ?? "",
+            CreditorName: transfer.RecipientName ?? "Unknown",
+            CreditorAccountNumber: transfer.ToAccountNumber ?? "",
+            Description: transfer.Description
+        ));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(config.TimeoutSeconds));
+        var (success, error) = await mqGateway.SendXmlAsync(Encoding.UTF8.GetBytes(pacs008Xml), cts.Token);
+
+        if (!success)
+        {
+            transfer.Status = TransferStatus.Failed;
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            await db.SaveChangesAsync();
+            return PaymentServiceBase.MapToResponse(transfer);
+        }
+
+        transfer.Status = TransferStatus.Pending;
+        transfer.ExternalReferenceId = msgId;
+        await db.SaveChangesAsync();
+        return PaymentServiceBase.MapToResponse(transfer);
     }
 }

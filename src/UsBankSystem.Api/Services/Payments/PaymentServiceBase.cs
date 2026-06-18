@@ -14,7 +14,8 @@ public abstract class PaymentServiceBase(AppDbContext db)
     protected AppDbContext Db => db;
 
     protected async Task<TransferResponse> CreatePendingApprovalAsync(
-        Account fromAccount, Guid? toAccountId, decimal amount, string currency, string channel, string? description)
+        Account fromAccount, Guid? toAccountId, decimal amount, string currency, string channel, string? description,
+        string? toAccountNumber = null, string? toRoutingNumber = null, string? recipientName = null)
     {
         fromAccount.ReservedBalance += amount;
 
@@ -23,6 +24,9 @@ public abstract class PaymentServiceBase(AppDbContext db)
             Id = Guid.NewGuid(),
             FromAccountId = fromAccount.Id,
             ToAccountId = toAccountId,
+            ToAccountNumber = toAccountNumber,
+            ToRoutingNumber = toRoutingNumber,
+            RecipientName = recipientName,
             Amount = amount,
             Currency = currency.ToUpperInvariant(),
             Channel = channel,

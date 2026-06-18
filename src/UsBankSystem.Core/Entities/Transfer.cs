@@ -11,6 +11,8 @@ public class Transfer
     public string Channel { get; set; } = null!;    // internal | ach | rtp | fednow | swift
     public string Status { get; set; } = "pending"; // pending | pending_approval | completed | failed | rejected
     public string? ExternalReferenceId { get; set; }
+    public string? ToRoutingNumber { get; set; }
+    public string? RecipientName { get; set; }
     public string? Description { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }

@@ -71,7 +71,7 @@ public class CreateSwiftTransferTests
         var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(), CreatePaymentConfig(swiftDailyLimit));
         var fedNowPayment = new FedNowPaymentService(db, CreateMqGateway(), new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
         var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(swiftStatus), CreatePaymentConfig(swiftDailyLimit));
-        var transferService = new TransferService(db);
+        var transferService = new TransferService(db, CreateMqGateway(), new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
         var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {

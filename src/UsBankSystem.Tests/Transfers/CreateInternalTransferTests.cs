@@ -66,7 +66,7 @@ public class CreateInternalTransferTests
     	var rtpPayment = new RtpPaymentService(db, rtpGateway, paymentConfig);
     	var fedNowPayment = new FedNowPaymentService(db, mqGateway, new Pacs008Builder(), paymentConfig);
     	var swiftPayment = new SwiftPaymentService(db, swiftGateway, paymentConfig);
-    	var transferService = new TransferService(db);
+    	var transferService = new TransferService(db, mqGateway, new Pacs008Builder(), paymentConfig);
     	var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
     	controller.ControllerContext = new ControllerContext
     	{
