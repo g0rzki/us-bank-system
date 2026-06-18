@@ -127,4 +127,52 @@ public class Pain013HandlingTests
         Assert.Equal(500m, reloaded!.Balance);
         Assert.Equal(0m, reloaded.ReservedBalance);
     }
+
+    private const string Pacs008Template = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">
+          <FIToFICstmrCdtTrf>
+            <GrpHdr>
+              <MsgId>MSG-20260618-0001</MsgId>
+              <CreDtTm>2026-06-18T12:00:00</CreDtTm>
+            </GrpHdr>
+            <CdtTrfTxInf>
+              <PmtId><EndToEndId>E2E-20260618-INCOMING-001</EndToEndId></PmtId>
+              <IntrBkSttlmAmt Ccy="USD">200.00</IntrBkSttlmAmt>
+              <DbtrAgt><FinInstnId><ClrSysMmbId><nm>Leek Bank</nm><MmbId>010101012</MmbId></ClrSysMmbId></FinInstnId></DbtrAgt>
+              <Dbtr><Nm>External Sender</Nm></Dbtr>
+              <DbtrAcct><Id><Othr><Id>999888777</Id><SchmeNm><Prtry>US_ACCT</Prtry></SchmeNm></Othr></Id></DbtrAcct>
+              <CdtrAgt><FinInstnId><ClrSysMmbId><nm>Baguette Bank</nm><MmbId>040104018</MmbId></ClrSysMmbId></FinInstnId></CdtrAgt>
+              <Cdtr><Nm>Local Receiver</Nm></Cdtr>
+              <CdtrAcct><Id><Othr><Id>{0}</Id><SchmeNm><Prtry>US_ACCT</Prtry></SchmeNm></Othr></Id></CdtrAcct>
+              <RmtInf><Ustrd>Incoming payment</Ustrd></RmtInf>
+            </CdtTrfTxInf>
+          </FIToFICstmrCdtTrf>
+        </Document>
+        """;
+
+    [Fact]
+    public async Task HandleIncomingPacs008_SetsCorrectDirection()
+    {
+        var options = CreateDbOptions();
+        using var setupDb = CreateDb(options);
+        var user = new User { Id = Guid.NewGuid(), Email = "receiver@example.com", PasswordHash = "hash", FirstName = "Local", LastName = "Receiver", Status = "active", CreatedAt = DateTime.UtcNow };
+        setupDb.Users.Add(user);
+        var account = new Account { Id = Guid.NewGuid(), UserId = user.Id, AccountNumber = "123456789012", Type = "checking", Balance = 500m, ReservedBalance = 0m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow };
+        setupDb.Accounts.Add(account);
+        await setupDb.SaveChangesAsync();
+
+        var service = CreateService(options);
+        var xml = string.Format(Pacs008Template, account.AccountNumber);
+
+        await service.ProcessMessageAsync(Encoding.UTF8.GetBytes(xml), CancellationToken.None);
+
+        using var assertDb = CreateDb(options);
+        var transfer = await assertDb.Transfers.FirstOrDefaultAsync();
+        Assert.NotNull(transfer);
+        Assert.Null(transfer.FromAccountId);
+        Assert.Equal(account.Id, transfer.ToAccountId);
+        Assert.Equal("completed", transfer.Status);
+        Assert.Equal(200m, transfer.Amount);
+    }
 }

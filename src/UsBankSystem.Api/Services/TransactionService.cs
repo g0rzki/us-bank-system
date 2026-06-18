@@ -43,7 +43,7 @@ public class TransactionService(AppDbContext db)
             .ToDictionaryAsync(tr => tr.Id);
 
         var fromAccountNumbers = await db.Accounts
-            .Where(a => transferMap.Values.Select(tr => tr.FromAccountId).Contains(a.Id))
+            .Where(a => transferMap.Values.Select(tr => (Guid?)tr.FromAccountId).Contains(a.Id))
             .Select(a => new { a.Id, a.AccountNumber })
             .ToDictionaryAsync(a => a.Id, a => a.AccountNumber);
 
@@ -55,7 +55,7 @@ public class TransactionService(AppDbContext db)
             {
                 counterparty = t.Type == "debit"
                     ? transfer.ToAccountNumber
-                    : fromAccountNumbers.GetValueOrDefault(transfer.FromAccountId);
+                    : transfer.FromAccountId.HasValue ? fromAccountNumbers.GetValueOrDefault(transfer.FromAccountId.Value) : null;
             }
             string? channel = null;
             if (t.ReferenceId != null && Guid.TryParse(t.ReferenceId, out var tid2)

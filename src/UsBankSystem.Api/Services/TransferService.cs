@@ -50,7 +50,7 @@ public class TransferService(
             .FirstOrDefaultAsync(t => t.Id == transferId)
             ?? throw new KeyNotFoundException("Transfer not found");
 
-        var isOwner = transfer.FromAccount.UserId == userId
+        var isOwner = (transfer.FromAccount != null && transfer.FromAccount.UserId == userId)
             || (transfer.ToAccountId.HasValue && await db.Accounts.AnyAsync(a => a.Id == transfer.ToAccountId && a.UserId == userId))
             || await db.JuniorAccounts.AnyAsync(j => j.AccountId == transfer.FromAccountId && j.ParentUserId == userId);
 
@@ -79,7 +79,7 @@ public class TransferService(
             {
                 Id = t.Id,
                 FromAccountId = t.FromAccountId,
-                FromAccountNumber = t.FromAccount.AccountNumber,
+                FromAccountNumber = t.FromAccount != null ? t.FromAccount.AccountNumber : null,
                 ToAccountId = t.ToAccountId,
                 Amount = t.Amount,
                 Currency = t.Currency,
@@ -127,7 +127,7 @@ public class TransferService(
             new()
             {
                 Id = Guid.NewGuid(),
-                AccountId = transfer.FromAccountId,
+                AccountId = transfer.FromAccountId!.Value,
                 Amount = transfer.Amount,
                 Type = TransactionType.Debit,
                 Status = TransactionStatus.Completed,
@@ -214,7 +214,7 @@ public class TransferService(
                 db.Transactions.Add(new Transaction
                 {
                     Id = Guid.NewGuid(),
-                    AccountId = transfer.FromAccountId,
+                    AccountId = transfer.FromAccountId!.Value,
                     Amount = transfer.Amount,
                     Type = TransactionType.Debit,
                     Status = TransactionStatus.Completed,

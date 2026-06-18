@@ -226,7 +226,7 @@ public class FedNowPollingService(
         var transfer = new Transfer
         {
             Id = Guid.NewGuid(),
-            FromAccountId = account.Id,
+            FromAccountId = null,
             ToAccountId = account.Id,
             ToAccountNumber = incoming.CreditorAccountNumber,
             Amount = incoming.Amount,
