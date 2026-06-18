@@ -67,11 +67,11 @@ public class Pain013HandlingTests
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => new AppDbContext(dbOptions));
+        services.AddScoped(_ => CreateMqGateway(mqStatus));
         var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
 
         return new FedNowPollingService(
             scopeFactory,
-            CreateMqGateway(mqStatus),
             new Pacs002Parser(),
             new Pacs008Parser(),
             new Pain013Parser(),

@@ -14,7 +14,6 @@ namespace UsBankSystem.Api.Services.Polling;
 
 public class FedNowPollingService(
     IServiceScopeFactory scopeFactory,
-    FedNowMqGateway mqGateway,
     Pacs002Parser pacs002Parser,
     Pacs008Parser pacs008Parser,
     Pain013Parser pain013Parser,
@@ -36,6 +35,8 @@ public class FedNowPollingService(
         {
             try
             {
+                using var pollScope = scopeFactory.CreateScope();
+                var mqGateway = pollScope.ServiceProvider.GetRequiredService<FedNowMqGateway>();
                 var xmlBytes = await mqGateway.PollIncomingAsync(stoppingToken);
                 if (xmlBytes is not null)
                 {
@@ -201,6 +202,7 @@ public class FedNowPollingService(
 
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var mqGateway = scope.ServiceProvider.GetRequiredService<FedNowMqGateway>();
 
         var alreadyExists = await db.Transfers.AnyAsync(
             t => t.ExternalReferenceId == incoming.EndToEndId && t.Channel == TransferChannel.FedNow, ct);
@@ -218,7 +220,7 @@ public class FedNowPollingService(
         {
             logger.LogWarning("FedNow: incoming pacs.008 for unknown account '{AccountNumber}'. Sending RJCT. MsgId: {MsgId}",
                 incoming.CreditorAccountNumber, incoming.MsgId);
-            await SendPacs002ResponseAsync(incoming, "RJCT", config, ct);
+            await SendPacs002ResponseAsync(incoming, "RJCT", config, mqGateway, ct);
             return;
         }
 
@@ -257,7 +259,7 @@ public class FedNowPollingService(
         logger.LogInformation("FedNow: incoming transfer {TransferId} credited to account {AccountNumber}, amount {Amount} {Currency}",
             transfer.Id, account.AccountNumber, incoming.Amount, incoming.Currency);
 
-        await SendPacs002ResponseAsync(incoming, "ACCP", config, ct);
+        await SendPacs002ResponseAsync(incoming, "ACCP", config, mqGateway, ct);
     }
 
     private async Task HandlePain013Async(string xml, byte[] xmlBytes, CancellationToken ct)
@@ -278,6 +280,7 @@ public class FedNowPollingService(
 
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var mqGateway = scope.ServiceProvider.GetRequiredService<FedNowMqGateway>();
 
         var alreadyExists = await db.Transfers.AnyAsync(
             t => t.ExternalReferenceId == incoming.EndToEndId && t.Channel == TransferChannel.FedNow, ct);
@@ -297,7 +300,7 @@ public class FedNowPollingService(
         {
             logger.LogWarning("FedNow: pain.013 references unknown debtor account '{AccountNumber}'. Sending RJCT pain.014. MsgId: {MsgId}",
                 incoming.DebtorAccountNumber, incoming.MsgId);
-            await SendPain014ResponseAsync(incoming, "RJCT", ct);
+            await SendPain014ResponseAsync(incoming, "RJCT", mqGateway, ct);
             return;
         }
 
@@ -306,7 +309,7 @@ public class FedNowPollingService(
         {
             logger.LogWarning("FedNow: pain.013 insufficient funds for account '{AccountNumber}'. Available: {Available}, Requested: {Amount}. Sending RJCT pain.014",
                 incoming.DebtorAccountNumber, availableBalance, incoming.Amount);
-            await SendPain014ResponseAsync(incoming, "RJCT", ct);
+            await SendPain014ResponseAsync(incoming, "RJCT", mqGateway, ct);
             return;
         }
 
@@ -314,7 +317,7 @@ public class FedNowPollingService(
         {
             logger.LogWarning("FedNow: pain.013 debtor account '{AccountNumber}' has no associated user. Sending RJCT pain.014",
                 incoming.DebtorAccountNumber);
-            await SendPain014ResponseAsync(incoming, "RJCT", ct);
+            await SendPain014ResponseAsync(incoming, "RJCT", mqGateway, ct);
             return;
         }
 
@@ -339,7 +342,7 @@ public class FedNowPollingService(
         db.Transfers.Add(transfer);
         await db.SaveChangesAsync(ct);
 
-        await SendPain014ResponseAsync(incoming, "ACCP", ct);
+        await SendPain014ResponseAsync(incoming, "ACCP", mqGateway, ct);
 
         var senderName = $"{debtorAccount.User.FirstName} {debtorAccount.User.LastName}";
 
@@ -374,7 +377,7 @@ public class FedNowPollingService(
             incoming.EndToEndId, transfer.Id);
     }
 
-    private async Task SendPacs002ResponseAsync(IncomingPacs008 incoming, string status, FedNowConfig config, CancellationToken ct)
+    private async Task SendPacs002ResponseAsync(IncomingPacs008 incoming, string status, FedNowConfig config, FedNowMqGateway mqGateway, CancellationToken ct)
     {
         var responseXml = pacs002Builder.Build(new Pacs002Data(
             MsgId: $"MSG-{DateTime.UtcNow:yyyyMMdd}-STS-{Guid.NewGuid():N}",
@@ -406,7 +409,7 @@ public class FedNowPollingService(
         }
     }
 
-    private async Task SendPain014ResponseAsync(IncomingPain013 incoming, string status, CancellationToken ct)
+    private async Task SendPain014ResponseAsync(IncomingPain013 incoming, string status, FedNowMqGateway mqGateway, CancellationToken ct)
     {
         // pain.014 confirms receipt of payment request (pain.013), NOT settlement.
         // Does not change transfer status or book funds.
