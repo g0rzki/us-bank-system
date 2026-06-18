@@ -280,7 +280,7 @@ public class TransferService(
             DebtorBankRtn: config.BankRtn,
             DebtorName: senderName,
             DebtorAccountNumber: transfer.FromAccount.AccountNumber,
-            CreditorBankName: transfer.RecipientName ?? "Unknown",
+            CreditorBankName: "Unknown Bank",
             CreditorBankRtn: transfer.ToRoutingNumber ?? "",
             CreditorName: transfer.RecipientName ?? "Unknown",
             CreditorAccountNumber: transfer.ToAccountNumber ?? "",

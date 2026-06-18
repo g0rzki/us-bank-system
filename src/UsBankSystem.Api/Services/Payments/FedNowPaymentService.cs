@@ -73,7 +73,7 @@ public class FedNowPaymentService(
             DebtorBankRtn: config.BankRtn,
             DebtorName: senderName,
             DebtorAccountNumber: fromAccount.AccountNumber,
-            CreditorBankName: request.RecipientName ?? "Unknown",
+            CreditorBankName: "Unknown Bank",
             CreditorBankRtn: request.ToRoutingNumber,
             CreditorName: request.RecipientName ?? "Unknown",
             CreditorAccountNumber: request.ToAccountNumber,
