@@ -47,7 +47,7 @@ public class ApprovalServiceTests
 
     private TransfersController CreateController(AppDbContext db, Guid userId)
     {
-        var achGateway = new AchGateway(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}")) { BaseAddress = new Uri("http://localhost:6001") }, NullLogger<AchGateway>.Instance);
+        var achGateway = AchTestHelpers.CreateGateway();
         var rtpGateway = new RtpGateway(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}")) { BaseAddress = new Uri("http://localhost:6002") }, NullLogger<RtpGateway>.Instance);
         var mqGateway = new FedNowMqGateway(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"status":"sent"}""")) { BaseAddress = new Uri("http://localhost:8770") }, NullLogger<FedNowMqGateway>.Instance);
         var swiftGateway = new SwiftGateway(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}")) { BaseAddress = new Uri("http://localhost:6004") }, NullLogger<SwiftGateway>.Instance);

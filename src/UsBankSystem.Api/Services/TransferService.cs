@@ -45,17 +45,15 @@ public class TransferService(
 
     public async Task<TransferStatusResponse> GetStatusAsync(Guid userId, Guid transferId)
     {
+        // Ownership predicate included in the query so both "not found" and "not authorized"
+        // return the same 404 — prevents IDOR enumeration via distinguishable error codes.
         var transfer = await db.Transfers
             .Include(t => t.FromAccount)
-            .FirstOrDefaultAsync(t => t.Id == transferId)
+            .FirstOrDefaultAsync(t => t.Id == transferId
+                && (t.FromAccount.UserId == userId
+                    || db.Accounts.Any(a => a.Id == t.ToAccountId && a.UserId == userId)
+                    || db.JuniorAccounts.Any(j => j.AccountId == t.FromAccountId && j.ParentUserId == userId)))
             ?? throw new KeyNotFoundException("Transfer not found");
-
-        var isOwner = (transfer.FromAccount != null && transfer.FromAccount.UserId == userId)
-            || (transfer.ToAccountId.HasValue && await db.Accounts.AnyAsync(a => a.Id == transfer.ToAccountId && a.UserId == userId))
-            || await db.JuniorAccounts.AnyAsync(j => j.AccountId == transfer.FromAccountId && j.ParentUserId == userId);
-
-        if (!isOwner)
-            throw new UnauthorizedAccessException("Access denied");
 
         return new TransferStatusResponse
         {
@@ -111,6 +109,11 @@ public class TransferService(
 
         if (transfer.Channel == TransferChannel.FedNow)
             return await ApproveFedNowAsync(transfer, userId);
+
+        if (transfer.Channel == TransferChannel.Ach && transfer.ToAccountId is null)
+            throw new InvalidOperationException(
+                "ACH external transfers cannot be approved through this flow. " +
+                "Reject this transfer and have the parent submit directly via the ACH endpoint.");
 
         transfer.FromAccount.Balance -= transfer.Amount;
         transfer.FromAccount.ReservedBalance -= transfer.Amount;
@@ -180,12 +183,12 @@ public class TransferService(
         return PaymentServiceBase.MapToResponse(transfer);
     }
 
-    public async Task ProcessWebhookAsync(Guid transferId, string status, string? referenceId)
+    public async Task ProcessWebhookAsync(Guid transferId, string status, string? referenceId, CancellationToken ct = default)
     {
         var transfer = await db.Transfers
             .Include(t => t.FromAccount)
             .Include(t => t.ToAccount)
-            .FirstOrDefaultAsync(t => t.Id == transferId)
+            .FirstOrDefaultAsync(t => t.Id == transferId, ct)
             ?? throw new KeyNotFoundException("Transfer not found");
 
         if (transfer.Status != TransferStatus.Pending)
@@ -203,7 +206,7 @@ public class TransferService(
             transfer.ExternalReferenceId = referenceId ?? transfer.ExternalReferenceId;
 
             var existingDebit = await db.Transactions.FirstOrDefaultAsync(t =>
-                t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit);
+                t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit, ct);
 
             if (existingDebit is not null)
             {
@@ -243,6 +246,11 @@ public class TransferService(
         {
             transfer.FromAccount.ReservedBalance -= transfer.Amount;
             transfer.Status = TransferStatus.Failed;
+
+            var failedDebit = await db.Transactions.FirstOrDefaultAsync(t =>
+                t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit, ct);
+            if (failedDebit is not null)
+                failedDebit.Status = TransactionStatus.Failed;
         }
         else if (status == TransferStatus.Rejected)
         {
@@ -255,7 +263,7 @@ public class TransferService(
             throw new ArgumentException($"Invalid status '{status}'");
         }
 
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task<TransferResponse> ApproveFedNowAsync(Transfer transfer, Guid userId)

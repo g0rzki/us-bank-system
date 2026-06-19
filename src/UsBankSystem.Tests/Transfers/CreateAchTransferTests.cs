@@ -43,20 +43,13 @@ public class CreateAchTransferTests
         	FedNow = new FedNowConfig { TimeoutSeconds = 10, PollIntervalSeconds = 1, BankRtn = "040104018", BankLegalName = "Baguette Bank" }
         });
 
-    private static AchGateway CreateGateway(HttpStatusCode statusCode, string body)
+    private TransfersController CreateController(AppDbContext db, Guid userId, bool gatewayFails = false)
     {
-        var handler = new MockHttpMessageHandler(statusCode, body);
-        var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:6001") };
-        return new AchGateway(client, NullLogger<AchGateway>.Instance);
-    }
-
-    private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode gatewayStatus = HttpStatusCode.OK)
-    {
-        var gateway = CreateGateway(gatewayStatus, """{"referenceId":"ACH-REF-001"}""");
-		var rtpGateway = new RtpGateway(
-        	new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
-            	{ BaseAddress = new Uri("http://localhost:6002") },
-        	NullLogger<RtpGateway>.Instance);
+        var gateway = AchTestHelpers.CreateGateway(gatewayFails);
+        var rtpGateway = new RtpGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+                { BaseAddress = new Uri("http://localhost:6002") },
+            NullLogger<RtpGateway>.Instance);
 		var mqGateway = new FedNowMqGateway(
         	new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"status":"sent"}"""))
             	{ BaseAddress = new Uri("http://localhost:8770") },
@@ -126,6 +119,7 @@ public class CreateAchTransferTests
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 100m
         });
         var created = Assert.IsType<ObjectResult>(result);
@@ -142,6 +136,7 @@ public class CreateAchTransferTests
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 100m
         });
         var account = await db.Accounts.FindAsync(accountId);
@@ -159,6 +154,7 @@ public class CreateAchTransferTests
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 9999m
         }));
     }
@@ -167,12 +163,13 @@ public class CreateAchTransferTests
     public async Task CreateAch_GatewayFailure_ThrowsAndReleasesReservation()
     {
         var (db, userId, accountId) = await Setup();
-        var controller = CreateController(db, userId, HttpStatusCode.BadRequest);
+        var controller = CreateController(db, userId, gatewayFails: true);
         await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateAch(new CreateAchTransferRequest
         {
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 100m
         }));
         var account = await db.Accounts.FindAsync(accountId);
@@ -189,10 +186,12 @@ public class CreateAchTransferTests
             FromAccountId = accountId,
             ToRoutingNumber = "021000021",
             ToAccountNumber = "1234567890",
+            RecipientName = "Test Recipient",
             Amount = 100m
         });
         var transfer = await db.Transfers.FirstAsync();
-        Assert.Equal("ACH-REF-001", transfer.ExternalReferenceId);
+        // ExternalReferenceId is deterministic from transfer.Id — set before gateway call
+        Assert.Equal(AchGateway.ComputeFileId(transfer.Id), transfer.ExternalReferenceId);
     }
 }
 

@@ -30,7 +30,33 @@ Aplikacja webowa symulująca działanie amerykańskiego banku detalicznego. Proj
 ## Wiedza domenowa
 
 ### ACH (Automated Clearing House)
-> 📝 TODO (US-57) — opis mechanizmu, okna czasowe batch, rozliczenie T+1, rola NACHA
+
+ACH to sieć rozliczeniowa obsługiwana przez **NACHA** (National Automated Clearing House Association). Przelewy są grupowane w **batch files** wysyłanych do Fed Reserve Bank (FRB), który pośredniczy między bankami. Rozliczenie następuje następnego dnia roboczego (**T+1**).
+
+**Mechanizm w tym projekcie:**
+- Bank formuje plik **NACHA** (fixed-width, 94-znakowe rekordy) z transakcjami PPD (Prearranged Payment and Deposit)
+- Plik jest uploadowany przez **SFTP** do systemu **FedSystems** (`inbound/`)
+- FedSystems przetwarza batch i zwraca plik `.ack` w `outbound/` (accepted / rejected)
+- Polling co 60 sekund sprawdza wyniki i finalizuje przelewy
+- Przychodzące przelewy od innych banków trafiają jako `processed_*.ach` w `outbound/`
+
+**Kody transakcji NACHA:**
+| Kod | Typ konta | Opis |
+|---|---|---|
+| `22` | Checking | Credit (wpływ na konto rozliczeniowe) |
+| `32` | Savings | Credit (wpływ na konto oszczędnościowe) |
+
+**Limit dzienny:** NACHA pozwala na max **36 plików dziennie** na originator (`file_id_modifier`: A–Z, następnie 0–9). Przekroczenie limitu rzuca wyjątek z komunikatem.
+
+**Identyfikatory:**
+- Nasz RTN: `110000000`
+- RTN Fed Reserve Bank: `090000515`
+- `trace_number`: `{RTN[..8]}{seq:D7}` — unikalny w skali dnia, generowany z DB-backed counter
+
+**Znane ograniczenia:**
+- `.ack` od FedSystems potwierdza tylko poprawność formatu pliku — nie jest to potwierdzenie rozliczenia. Faktyczne rozliczenie następuje po ~3 dniach roboczych bez oddzielnego callbacku. Aktualnie pozytywny `.ack` oznacza transfer jako `Completed`; docelowo wymagany jest osobny job rozliczeniowy.
+- Prenoty (kody NACHA `23`/`33`) są pomijane — FedSystems może je wysyłać jako weryfikację konta przed prawdziwym przelewem. Aktualnie lądują jako niezidentyfikowane linie w logach.
+- Debety przychodzące (`27`/`28`/`37`/`38`) logowane jako `LogWarning`, ale nie są księgowane — wymagają osobnej obsługi.
 
 ### RTP (Real-Time Payments)
 > 📝 TODO (US-57) — opis mechanizmu, rozliczenie natychmiastowe 24/7, rola The Clearing House
@@ -146,16 +172,33 @@ classDiagram
 
 ### Przepływ przelewu ACH (BPMN)
 
-> 📝 TODO (US-53) — diagram przepływu: inicjacja → batch → clearing → settlement → status
-
 ```mermaid
-%% TODO (US-53): Uzupełnić diagram BPMN przepływu ACH
-flowchart LR
-    A[Inicjacja ACH] --> B[Batch window]
-    B --> C[Clearing]
-    C --> D[Settlement T+1]
-    D --> E[Status update]
+flowchart TD
+    U([Użytkownik]) -->|POST /transfers/ach| API[AchPaymentService]
+    API -->|1. Rezerwuje saldo| DB[(PostgreSQL)]
+    API -->|2. Zapisuje transfer Pending| DB
+    API -->|3. SendAsync| GW[AchGateway]
+    GW -->|4. NextAsync — atomowy licznik| DB
+    GW -->|5. POST /json-to-ach| HELPER[ACH Helper :8310]
+    HELPER -->|NACHA bytes| GW
+    GW -->|6. Upload inbound/YYYYMMDD_XXX.ach| SFTP[FedSystems SFTP :2221]
+    SFTP -->|7. outbound/*.ack| POLL[AchPollingService]
+    POLL -->|co 60s listuje outbound/| SFTP
+    POLL -->|8. aktualizuje status| DB
+    SFTP -->|processed_*.ach — incoming| POLL
+    POLL -->|9. zapisuje incoming transfer| DB
 ```
+
+**Legenda kroków:**
+1. `AchPaymentService` blokuje saldo na koncie nadawcy (`ReservedBalance += amount`)
+2. Transfer zapisywany z `Status = Pending`, `ExternalReferenceId = ComputeFileId(transferId)`
+3. `AchGateway.SendAsync` wywoływany synchronicznie w tym samym flow
+4. Atomowy counter w tabeli `AchDailyCounters` (PostgreSQL `INSERT ... ON CONFLICT DO UPDATE RETURNING`)
+5. JSON z detalami przelewu wysyłany do lokalnego serwisu pomocniczego, który zwraca gotowe bajty NACHA
+6. Plik NACHA uploadowany do FedSystems przez SFTP (SSH public-key auth)
+7. Po przetworzeniu FedSystems umieszcza `.ack` w `outbound/` — polling sprawdza co 60s
+8. Status transferu aktualizowany do `Completed` lub `Failed`, saldo debitowane lub zwalniane
+9. Przelewy przychodzące (`processed_*.ach`) → nowe transakcje na koncie odbiorcy
 
 ### Przepływ przelewu FedNow (BPMN)
 
@@ -272,6 +315,17 @@ KLIK_WEBHOOK_SECRET=dowolny_sekret                    # zabezpieczenie webhooka 
 CARDS_API_KEY=bank-key-us-a
 CARDS_HMAC_SECRET=secret-us-a-hmac
 CARDS_ADMIN_KEY=admin-secret-key-2026
+
+# ACH / FedSystems SFTP
+Ach__RoutingNumber=110000000          # nasz RTN (9 cyfr)
+Ach__LegalName=US Bank A             # nazwa banku w nagłówku NACHA
+Ach__FrbRoutingNumber=090000515      # RTN Fed Reserve Bank (RDFI)
+Ach__FrbName=FRB Tungsten            # nazwa RDFI
+Ach__Sftp__Host=fedsystems.example   # hostname serwera SFTP FedSystems
+Ach__Sftp__Port=2221                 # port SFTP
+Ach__Sftp__Username=us-bank-a        # login SFTP
+Ach__Sftp__PrivateKeyPath=sftp_keys/id_rsa   # ścieżka do klucza prywatnego SSH
+Ach__Sftp__HostFingerprint=          # SHA256 fingerprint serwera (zabezpieczenie przed MITM)
 ```
 
 > `FRONTEND_PORT` to jedyne miejsce gdzie ustawiasz port frontendu — `docker-compose.yaml` używa go zarówno do mapowania portów jak i do konfiguracji CORS w API.
@@ -449,17 +503,18 @@ INTEGRATIONS_KLIK_API_KEY=twoj_api_key        # klucz API od operatora KLIK
 KLIK_WEBHOOK_SECRET=opcjonalny_sekret         # nagłówek X-Webhook-Secret na /klik/webhook/*
 ```
 
-W środowisku deweloperskim każda integracja działa przez **mock stub** (`UsBankSystem.MockGateways`) — osobny serwis który symuluje realistyczne zachowanie każdego kanału:
+**mock stub** (`UsBankSystem.MockGateways`):
 
 | Kanał | Port | Zachowanie |
 |---|---|---|
-| ACH | 6001 | Odpowiada natychmiast, po skonfigurowanym czasie wysyła webhook do API z wynikiem (jak prawdziwy batch) |
-| RTP | 6002 | Czeka kilka sekund i odpowiada synchronicznie `Completed` (real-time rail) |
-| FedNow | 6003 | Tak samo jak RTP |
-| SWIFT | 6004 | Odpowiada natychmiast, webhook po dłuższym czasie (settlement 1-5 dni roboczych) |
+| ACH helper | 8310 | Konwertuje JSON z detalami przelewu → plik NACHA (`POST /json-to-ach`). Wymagany lokalnie. |
+| FedSystems SFTP | 2221 | Prawdziwy serwer SFTP — upload w `inbound/`, polling `outbound/` co 60s |
+| RTP | 6002 | Mock: czeka kilka sekund i odpowiada synchronicznie `Completed` |
+| FedNow | 6003 | Mock: tak samo jak RTP |
+| SWIFT | 6004 | Mock: odpowiada natychmiast, webhook po dłuższym czasie |
 | KLIK C2B+P2P | 6006 | Mock KLIK: kody C2B (TTL 120s), symulacja terminala (`POST /simulate/initiate`), potwierdzenia z fee 1%+0.5%, aliasy P2P (register/lookup/delete) |
 
-Czasy opóźnień ACH/RTP/FedNow/SWIFT są brane z `payment-config.json`.
+Czasy opóźnień dla mock stubów (RTP/FedNow/SWIFT) są brane z `payment-config.json`.
 
 #### Testowanie KLIK C2B z mockiem
 
@@ -525,7 +580,7 @@ curl -s -X DELETE http://localhost:5100/accounts/{accountId}/phone-alias \
 Żeby przełączyć się z mocka na prawdziwy moduł — zmień odpowiedni URL w `.env` na adres modułu innej grupy, np.:
 
 ```env
-INTEGRATIONS_ACH_URL=http://adres-modulu-ach
+INTEGRATIONS_RTP_URL=http://adres-modulu-rtp
 ```
 
 ---

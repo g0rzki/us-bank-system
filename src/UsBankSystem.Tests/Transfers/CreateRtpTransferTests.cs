@@ -44,9 +44,7 @@ public class CreateRtpTransferTests
         });
 
     private static AchGateway CreateAchGateway() =>
-        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
-            { BaseAddress = new Uri("http://localhost:6001") },
-            NullLogger<AchGateway>.Instance);
+        AchTestHelpers.CreateGateway();
 
     private static RtpGateway CreateRtpGateway(HttpStatusCode statusCode) =>
         new(new HttpClient(new MockHttpMessageHandler(statusCode, """{"referenceId":"RTP-REF-001"}"""))

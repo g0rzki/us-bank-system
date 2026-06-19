@@ -48,10 +48,7 @@ public class ApproveRejectTransferTests
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode mqStatus = HttpStatusCode.OK)
     {
-        var achGateway = new AchGateway(
-            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"referenceId":"REF-001"}"""))
-                { BaseAddress = new Uri("http://localhost:6001") },
-            NullLogger<AchGateway>.Instance);
+        var achGateway = AchTestHelpers.CreateGateway();
         var rtpGateway = new RtpGateway(
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6002") },
