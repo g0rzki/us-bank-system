@@ -38,9 +38,7 @@ public class CreateInternalTransferTests
 
     private TransfersController CreateController(AppDbContext db, Guid userId)
 	{
-    	var handler = new MockHttpMessageHandler(HttpStatusCode.OK, """{"referenceId":"REF-001"}""");
-    	var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:6001") };
-    	var achGateway = new AchGateway(httpClient, NullLogger<AchGateway>.Instance);
+    	var achGateway = AchTestHelpers.CreateGateway();
     	var rtpGateway = new RtpGateway(
         	new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
             	{ BaseAddress = new Uri("http://localhost:6002") },

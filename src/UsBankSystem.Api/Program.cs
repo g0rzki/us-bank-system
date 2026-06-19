@@ -5,8 +5,10 @@ using Microsoft.IdentityModel.Tokens;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Extensions;
 using UsBankSystem.Api.Integrations;
+using UsBankSystem.Api.Integrations.Sftp;
 using UsBankSystem.Api.Middleware;
 using UsBankSystem.Api.Services;
+using UsBankSystem.Api.Services.Polling;
 using UsBankSystem.Infrastructure.Persistence;
 
 DotNetEnv.Env.TraversePath().Load();
@@ -26,6 +28,10 @@ builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.FedNowPaymentServi
 builder.Services.AddScoped<UsBankSystem.Api.Services.Payments.SwiftPaymentService>();
 builder.Services.AddScoped<UsBankSystem.Api.Services.CardService>();
 builder.Services.AddHostedService<UsBankSystem.Api.Services.CardExpiryJob>();
+builder.Services.AddSingleton<ISftpService, SftpService>();
+builder.Services.AddSingleton<IAchTraceSequencer, AchTraceSequencer>();
+builder.Services.AddSingleton<IncomingTransferProcessor>();
+builder.Services.AddHostedService<AchPollingService>();
 // CORS
 builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
     p.WithOrigins(builder.Configuration["Cors:Origin"] ?? "http://localhost:5173")
@@ -38,8 +44,7 @@ builder.Services.Configure<PaymentSessionConfig>(
     builder.Configuration.GetSection("PaymentSessions"));
 
 // Payment gateways — adresy z konfiguracji (env var lub .env); domyślnie mock stubs na localhost
-builder.Services.AddHttpClient<AchGateway>(c =>
-    c.BaseAddress = new Uri(builder.Configuration["Integrations:AchUrl"] ?? "http://localhost:6001"));
+builder.Services.AddScoped<AchGateway>();
 builder.Services.AddHttpClient<RtpGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpUrl"] ?? "http://localhost:6002"));
 builder.Services.AddHttpClient<FedNowGateway>(c =>

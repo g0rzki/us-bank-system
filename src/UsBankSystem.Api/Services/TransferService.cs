@@ -37,17 +37,15 @@ public class TransferService(AppDbContext db)
 
     public async Task<TransferStatusResponse> GetStatusAsync(Guid userId, Guid transferId)
     {
+        // Ownership predicate included in the query so both "not found" and "not authorized"
+        // return the same 404 — prevents IDOR enumeration via distinguishable error codes.
         var transfer = await db.Transfers
             .Include(t => t.FromAccount)
-            .FirstOrDefaultAsync(t => t.Id == transferId)
+            .FirstOrDefaultAsync(t => t.Id == transferId
+                && (t.FromAccount.UserId == userId
+                    || db.Accounts.Any(a => a.Id == t.ToAccountId && a.UserId == userId)
+                    || db.JuniorAccounts.Any(j => j.AccountId == t.FromAccountId && j.ParentUserId == userId)))
             ?? throw new KeyNotFoundException("Transfer not found");
-
-        var isOwner = transfer.FromAccount.UserId == userId
-            || (transfer.ToAccountId.HasValue && await db.Accounts.AnyAsync(a => a.Id == transfer.ToAccountId && a.UserId == userId))
-            || await db.JuniorAccounts.AnyAsync(j => j.AccountId == transfer.FromAccountId && j.ParentUserId == userId);
-
-        if (!isOwner)
-            throw new UnauthorizedAccessException("Access denied");
 
         return new TransferStatusResponse
         {
@@ -101,6 +99,15 @@ public class TransferService(AppDbContext db)
         if (availableBalance < transfer.Amount)
             throw new InvalidOperationException("Insufficient funds");
 
+        // ACH external transfers (ToAccountId = null) cannot be approved here: the gateway
+        // metadata (routing number, recipient name, etc.) is not stored on the Transfer and
+        // approval requires submitting a NACHA file. Reject and require the parent to resubmit
+        // directly via the ACH endpoint.
+        if (transfer.Channel == TransferChannel.Ach && transfer.ToAccountId is null)
+            throw new InvalidOperationException(
+                "ACH external transfers cannot be approved through this flow. " +
+                "Reject this transfer and have the parent submit directly via the ACH endpoint.");
+
         transfer.FromAccount.Balance -= transfer.Amount;
         transfer.FromAccount.ReservedBalance -= transfer.Amount;
         if (transfer.ToAccount is not null)
@@ -111,30 +118,32 @@ public class TransferService(AppDbContext db)
         transfer.ApprovedAt = DateTime.UtcNow;
         transfer.CompletedAt = DateTime.UtcNow;
 
-        db.Transactions.AddRange(
-            new Transaction
+        db.Transactions.Add(new Transaction
+        {
+            Id = Guid.NewGuid(),
+            AccountId = transfer.FromAccountId,
+            Amount = transfer.Amount,
+            Type = TransactionType.Debit,
+            Status = TransactionStatus.Completed,
+            Description = transfer.Description ?? "Junior transfer",
+            ReferenceId = transfer.Id.ToString(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        if (transfer.ToAccountId.HasValue)
+        {
+            db.Transactions.Add(new Transaction
             {
                 Id = Guid.NewGuid(),
-                AccountId = transfer.FromAccountId,
-                Amount = transfer.Amount,
-                Type = TransactionType.Debit,
-                Status = TransactionStatus.Completed,
-                Description = transfer.Description ?? "Junior transfer",
-                ReferenceId = transfer.Id.ToString(),
-                CreatedAt = DateTime.UtcNow
-            },
-            new Transaction
-            {
-                Id = Guid.NewGuid(),
-                AccountId = transfer.ToAccountId!.Value,
+                AccountId = transfer.ToAccountId.Value,
                 Amount = transfer.Amount,
                 Type = TransactionType.Credit,
                 Status = TransactionStatus.Completed,
                 Description = transfer.Description ?? "Junior transfer",
                 ReferenceId = transfer.Id.ToString(),
                 CreatedAt = DateTime.UtcNow
-            }
-        );
+            });
+        }
 
         await db.SaveChangesAsync();
         return PaymentServiceBase.MapToResponse(transfer);
@@ -162,12 +171,12 @@ public class TransferService(AppDbContext db)
         return PaymentServiceBase.MapToResponse(transfer);
     }
 
-    public async Task ProcessWebhookAsync(Guid transferId, string status, string? referenceId)
+    public async Task ProcessWebhookAsync(Guid transferId, string status, string? referenceId, CancellationToken ct = default)
     {
         var transfer = await db.Transfers
             .Include(t => t.FromAccount)
             .Include(t => t.ToAccount)
-            .FirstOrDefaultAsync(t => t.Id == transferId)
+            .FirstOrDefaultAsync(t => t.Id == transferId, ct)
             ?? throw new KeyNotFoundException("Transfer not found");
 
         if (transfer.Status != TransferStatus.Pending)
@@ -185,7 +194,7 @@ public class TransferService(AppDbContext db)
             transfer.ExternalReferenceId = referenceId ?? transfer.ExternalReferenceId;
 
             var existingDebit = await db.Transactions.FirstOrDefaultAsync(t =>
-                t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit);
+                t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit, ct);
 
             if (existingDebit is not null)
             {
@@ -225,12 +234,17 @@ public class TransferService(AppDbContext db)
         {
             transfer.FromAccount.ReservedBalance -= transfer.Amount;
             transfer.Status = TransferStatus.Failed;
+
+            var failedDebit = await db.Transactions.FirstOrDefaultAsync(t =>
+                t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit, ct);
+            if (failedDebit is not null)
+                failedDebit.Status = TransactionStatus.Failed;
         }
         else
         {
             throw new ArgumentException($"Invalid status '{status}'");
         }
 
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(ct);
     }
 }

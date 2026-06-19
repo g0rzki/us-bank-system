@@ -49,10 +49,7 @@ public class TransferStatusTests
 
     private TransfersController CreateController(AppDbContext db, Guid userId)
     {
-        var achGateway = new AchGateway(
-            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"referenceId":"ACH-REF-001"}"""))
-                { BaseAddress = new Uri("http://localhost:6001") },
-            NullLogger<AchGateway>.Instance);
+        var achGateway = AchTestHelpers.CreateGateway();
         var rtpGateway = new RtpGateway(
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6002") },
@@ -123,6 +120,7 @@ public class TransferStatusTests
         FromAccountId = fromAccountId,
         ToRoutingNumber = "021000021",
         ToAccountNumber = "9876543210",
+        RecipientName = "Test Recipient",
         Amount = 100m
     };
 
@@ -151,8 +149,9 @@ public class TransferStatusTests
         await controller.CreateAch(AchRequest(fromAccountId));
         var transfer = await db.Transfers.FirstAsync();
 
+        // IDOR fix: "unauthorized" returns same 404 as "not found" to prevent ownership enumeration
         var otherController = CreateController(db, Guid.NewGuid());
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => otherController.GetStatus(transfer.Id));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => otherController.GetStatus(transfer.Id));
     }
 
     [Fact]

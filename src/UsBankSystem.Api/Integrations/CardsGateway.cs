@@ -112,10 +112,8 @@ public class CardsGateway(HttpClient httpClient, IConfiguration configuration, I
         try
         {
             var body = new Dictionary<string, object?> { ["activated_by"] = "customer" };
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/cards/{cardToken}/activate");
-            request.Headers.Add("X-API-Key", ApiKey);
-            request.Content = new StringContent(JsonSerializer.Serialize(body, SignJsonOptions), Encoding.UTF8, "application/json");
-            var response = await httpClient.SendAsync(request, cancellationToken);
+            var (signature, timestamp) = Sign(body);
+            var response = await SendSignedAsync(HttpMethod.Post, $"/api/v1/cards/{cardToken}/activate", body, signature, timestamp, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -136,10 +134,8 @@ public class CardsGateway(HttpClient httpClient, IConfiguration configuration, I
         try
         {
             var body = new Dictionary<string, object?> { ["amount"] = (double)amount, ["currency"] = "USD" };
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/cards/{cardToken}/topup");
-            request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
-
-            var response = await httpClient.SendAsync(request, cancellationToken);
+            var (signature, timestamp) = Sign(body);
+            var response = await SendSignedAsync(HttpMethod.Post, $"/api/v1/cards/{cardToken}/topup", body, signature, timestamp, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -160,11 +156,8 @@ public class CardsGateway(HttpClient httpClient, IConfiguration configuration, I
         try
         {
             var body = new Dictionary<string, object?> { ["status"] = status, ["reason"] = reason };
-            using var request = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/cards/{cardToken}/status");
-            request.Headers.Add("X-API-Key", ApiKey);
-            request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
-
-            var response = await httpClient.SendAsync(request, cancellationToken);
+            var (signature, timestamp) = Sign(body);
+            var response = await SendSignedAsync(HttpMethod.Patch, $"/api/v1/cards/{cardToken}/status", body, signature, timestamp, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(cancellationToken);

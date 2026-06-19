@@ -44,9 +44,7 @@ public class CreateSwiftTransferTests
         });
 
     private static AchGateway CreateAchGateway() =>
-        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
-            { BaseAddress = new Uri("http://localhost:6001") },
-            NullLogger<AchGateway>.Instance);
+        AchTestHelpers.CreateGateway();
 
     private static RtpGateway CreateRtpGateway() =>
         new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))

@@ -100,12 +100,8 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         if (card.Status == CardStatus.Expired)
             throw new InvalidOperationException("Cannot change status of an expired card");
 
-        if (request.Status == CardStatus.Active && card.BlockedAt.HasValue)
-        {
-            var unblockAvailableAt = card.BlockedAt.Value.AddHours(24);
-            if (DateTime.UtcNow < unblockAvailableAt)
-                throw new InvalidOperationException($"Card cannot be unblocked until {unblockAvailableAt:O}");
-        }
+        if (card.Status == request.Status)
+            throw new InvalidOperationException($"Card is already {request.Status}");
 
         if (card.ExternalCardToken is not null)
         {
@@ -215,8 +211,8 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
             "ACTIVE"                                      => CardStatus.Active,
             "BLOCKED"                                     => CardStatus.Blocked,
             "EXPIRED" or "CANCELLED"                      => CardStatus.Expired,
-            // REQUESTED/PRODUCING/SHIPPED — karta jeszcze w drodze, traktujemy jako blocked
-            "REQUESTED" or "PRODUCING" or "SHIPPED"       => CardStatus.Blocked,
+            // REQUESTED/PRODUCING/SHIPPED — karta w lifecycle, nie zmieniamy naszego statusu
+            "REQUESTED" or "PRODUCING" or "SHIPPED"       => card.Status,
             _                                             => card.Status
         };
 
