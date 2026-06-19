@@ -43,7 +43,7 @@ public class CreateRtpTransferTests
         });
 
     private static AchGateway CreateAchGateway() =>
-        AchTestHelpers.CreateGateway(HttpStatusCode.OK, "NACHA");
+        AchTestHelpers.CreateGateway();
 
     private static RtpGateway CreateRtpGateway(HttpStatusCode statusCode) =>
         new(new HttpClient(new MockHttpMessageHandler(statusCode, """{"referenceId":"RTP-REF-001"}"""))

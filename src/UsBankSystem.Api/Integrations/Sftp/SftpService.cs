@@ -20,8 +20,20 @@ public class SftpService : ISftpService, IDisposable
         _port = configuration.GetValue<int?>("Ach:Sftp:Port") ?? 2221;
         _username = configuration["Ach:Sftp:Username"] ?? "us-bank-a";
         var keyPath = configuration["Ach:Sftp:PrivateKeyPath"] ?? "sftp_keys/id_rsa";
-        _keyFile = new PrivateKeyFile(keyPath);
+        var passphrase = configuration["Ach:Sftp:PrivateKeyPassphrase"];
+        _keyFile = string.IsNullOrEmpty(passphrase)
+            ? new PrivateKeyFile(keyPath)
+            : new PrivateKeyFile(keyPath, passphrase);
         _expectedFingerprint = configuration["Ach:Sftp:HostFingerprint"];
+
+        if (string.IsNullOrEmpty(_expectedFingerprint)
+            && !configuration.GetValue<bool>("Ach:Sftp:AllowUncheckedFingerprint"))
+        {
+            throw new InvalidOperationException(
+                "Ach:Sftp:HostFingerprint is not configured. " +
+                "Set it to the SFTP server's SHA-256 fingerprint to prevent MITM attacks, " +
+                "or set Ach:Sftp:AllowUncheckedFingerprint=true to bypass this check in dev/test.");
+        }
     }
 
     // Reuses the existing connection and reconnects only when needed
@@ -122,6 +134,7 @@ public class SftpService : ISftpService, IDisposable
     public void Dispose()
     {
         _client?.Dispose();
+        _keyFile.Dispose();
         _lock.Dispose();
     }
 }

@@ -44,7 +44,7 @@ public class CreateSwiftTransferTests
         });
 
     private static AchGateway CreateAchGateway() =>
-        AchTestHelpers.CreateGateway(HttpStatusCode.OK, "NACHA");
+        AchTestHelpers.CreateGateway();
 
     private static RtpGateway CreateRtpGateway() =>
         new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))

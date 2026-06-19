@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using UsBankSystem.Api.Integrations.Sftp;
 using UsBankSystem.Core.Domain;
 using UsBankSystem.Core.Domain.Transfers;
@@ -8,7 +7,7 @@ namespace UsBankSystem.Api.Integrations;
 
 // ACH uses SFTP/NACHA instead of REST, so it does not inherit PaymentGatewayBase
 // (which is designed for HTTP-based gateways like RTP, FedNow, SWIFT, Cards).
-public class AchGateway(HttpClient httpClient, ISftpService sftp, IAchTraceSequencer traceSequencer, IConfiguration configuration, ILogger<AchGateway> logger)
+public class AchGateway(ISftpService sftp, IAchTraceSequencer traceSequencer, IConfiguration configuration, ILogger<AchGateway> logger)
     : IPaymentGateway
 {
     public string Channel => TransferChannel.Ach;
@@ -41,7 +40,7 @@ public class AchGateway(HttpClient httpClient, ISftpService sftp, IAchTraceSeque
             var fileId = ComputeFileId(request.TransferId);
             var fileName = $"{fileId}.ach";
 
-            var achContent = await GenerateAchFileAsync(request, toRtn, toAccount, recipientName, accountType, fileId, cancellationToken);
+            var achContent = await GenerateNachaFileAsync(request, toRtn, toAccount, recipientName, accountType, cancellationToken);
             await sftp.UploadAsync($"inbound/{fileName}", achContent, cancellationToken);
 
             logger.LogInformation("ACH: uploaded {File} for transfer {TransferId}", fileName, request.TransferId);
@@ -56,72 +55,126 @@ public class AchGateway(HttpClient httpClient, ISftpService sftp, IAchTraceSeque
         {
             // The daily sequence counter is incremented before file generation (seq is embedded
             // in the NACHA content). A failure here permanently burns that slot — operators
-            // should monitor daily slot usage if SFTP outages or ACH-helper errors are frequent.
+            // should monitor daily slot usage if SFTP outages are frequent.
             logger.LogError(ex, "ACH gateway failed for transfer {TransferId} — a daily sequence slot may have been consumed", request.TransferId);
             return new PaymentGatewayResult(false, null, "ACH transfer submission failed");
         }
     }
 
-    private async Task<byte[]> GenerateAchFileAsync(PaymentGatewayRequest request, string toRtn, string toAccount, string recipientName, string accountType, string fileId, CancellationToken ct)
+    private async Task<byte[]> GenerateNachaFileAsync(
+        PaymentGatewayRequest request, string toRtn, string toAccount,
+        string recipientName, string accountType, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
+        var easternZone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+        var nowEt = TimeZoneInfo.ConvertTimeFromUtc(now, easternZone);
         var seq = await traceSequencer.NextAsync(ct);
-        var achJson = new
+        var modifier = AchTraceSequencer.FileIdModifier(seq);
+        logger.LogDebug("ACH: allocated sequence slot {Seq} (modifier={Modifier}) for transfer {TransferId}",
+            seq, modifier, request.TransferId);
+
+        var amountCents = (long)Math.Round(request.Amount * 100, MidpointRounding.AwayFromZero);
+        var txCode = accountType == "savings" ? "32" : "22";
+        var rdfi8 = toRtn[..8];
+        var rdfiCheckDigit = toRtn[8].ToString();
+        var creationDate = nowEt.ToString("yyMMdd");
+        var creationTime = nowEt.ToString("HHmm");
+        var effectiveDate = nowEt.AddDays(1).ToString("yyMMdd");
+        var batchNumStr = seq.ToString().PadLeft(7, '0');
+        var amountStr = amountCents.ToString().PadLeft(10, '0');
+        var creditStr = amountCents.ToString().PadLeft(12, '0');
+        // Entry hash = last 10 digits of the sum of all RDFI 8-digit routing numbers in the batch
+        var entryHash = (long.Parse(rdfi8) % 10_000_000_000L).ToString().PadLeft(10, '0');
+        var traceNumber = OurDfiId + seq.ToString("D7");
+        var name22 = Pad(recipientName[..Math.Min(22, recipientName.Length)], 22);
+
+        // NACHA fixed-width records: each exactly 94 chars, CRLF-separated.
+        // Blocking factor = 10; file record count must be a multiple of 10 (padded with '9' records).
+        var records = new List<string>
         {
-            data = new
-            {
-                header = new
-                {
-                    immediate_destination = FrbRtn,
-                    immediate_origin = OurRtn,
-                    immediate_destination_name = FrbName,
-                    immediate_origin_name = OurLegalName,
-                    // Per-day incrementing char (A→Z then 0→9) distinguishes multiple
-                    // files from the same originator on the same business day.
-                    file_id_modifier = AchTraceSequencer.FileIdModifier(seq).ToString()
-                },
-                batches = new[]
-                {
-                    new
-                    {
-                        header = new
-                        {
-                            company_name = OurLegalName,
-                            company_identification = CompanyId,
-                            standard_entry_class_code = "PPD",
-                            company_entry_description = "TRANSFER",
-                            effective_entry_date = now.AddDays(1).ToString("yyMMdd"),
-                            originating_dfi_identification = OurDfiId
-                        },
-                        entries = new[]
-                        {
-                            new
-                            {
-                                // Code 22 = automated deposit to checking (PPD), 32 = savings.
-                                transaction_code = accountType == "savings" ? "32" : "22",
-                                receiving_dfi_rtn = toRtn,
-                                dfi_account_number = toAccount,
-                                amount_cents = (long)Math.Round(request.Amount * 100, MidpointRounding.AwayFromZero),
-                                individual_name = recipientName[..Math.Min(22, recipientName.Length)],
-                                trace_number = $"{OurDfiId}{seq:D7}"
-                            }
-                        }
-                    }
-                }
-            }
+            // Record Type 1: File Header
+            R("1"
+              + "01"
+              + (" " + FrbRtn).PadRight(10)[..10]
+              + (" " + OurRtn).PadRight(10)[..10]
+              + creationDate + creationTime + modifier
+              + "094" + "10" + "1"
+              + Pad(FrbName, 23)
+              + Pad(OurLegalName, 23)
+              + "        "),
+
+            // Record Type 5: Batch Header
+            R("5"
+              + "220"
+              + Pad(OurLegalName, 16)
+              + new string(' ', 20)
+              + Pad(CompanyId, 10)
+              + "PPD"
+              + Pad("TRANSFER", 10)
+              + "      "
+              + effectiveDate
+              + "   "
+              + "1"
+              + OurDfiId
+              + batchNumStr),
+
+            // Record Type 6: Entry Detail
+            R("6"
+              + txCode
+              + rdfi8
+              + rdfiCheckDigit
+              + Pad(toAccount, 17)
+              + amountStr
+              + new string(' ', 15)
+              + name22
+              + "  "
+              + "0"
+              + traceNumber),
+
+            // Record Type 8: Batch Control
+            R("8"
+              + "220"
+              + "000001"
+              + entryHash
+              + "000000000000"
+              + creditStr
+              + Pad(CompanyId, 10)
+              + new string(' ', 19)
+              + "      "
+              + OurDfiId
+              + batchNumStr),
+
+            // Record Type 9: File Control
+            R("9"
+              + "000001"
+              + "000001"
+              + "00000001"
+              + entryHash
+              + "000000000000"
+              + creditStr
+              + new string(' ', 39)),
         };
 
-        var payload = JsonSerializer.Serialize(achJson);
-        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        var response = await httpClient.PostAsync("/json-to-ach", content, ct);
+        // Pad file to next multiple of 10 records (NACHA spec §2.7 blocking)
+        var paddingCount = (10 - records.Count % 10) % 10;
+        records.AddRange(Enumerable.Repeat(new string('9', 94), paddingCount));
 
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            logger.LogError("ACH helper returned {StatusCode}: {Body}", response.StatusCode, body);
-            throw new InvalidOperationException("ACH file generation failed");
-        }
+        return Encoding.UTF8.GetBytes(string.Join("\n", records));
+    }
 
-        return await response.Content.ReadAsByteArrayAsync(ct);
+    // Pad or truncate string to exactly `len` characters (space-padded on the right)
+    private static string Pad(string? s, int len)
+    {
+        s ??= "";
+        return s.Length >= len ? s[..len] : s + new string(' ', len - s.Length);
+    }
+
+    // Defensive length check: catches NACHA format bugs at generation time rather than at FedSystems
+    private static string R(string record)
+    {
+        if (record.Length != 94)
+            throw new InvalidOperationException(
+                $"NACHA record length is {record.Length}, expected 94: '{record[..Math.Min(20, record.Length)]}...'");
+        return record;
     }
 }

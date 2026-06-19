@@ -23,14 +23,26 @@ public sealed class AchTraceSequencer(IServiceScopeFactory scopeFactory) : IAchT
         try
         {
             await using var cmd = db.Database.GetDbConnection().CreateCommand();
+            // WHERE clause prevents incrementing past 36 (NACHA daily limit).
+            // When the condition is false PostgreSQL treats it as DO NOTHING and
+            // RETURNING returns no rows — ExecuteScalarAsync returns DBNull.
+            // Use Eastern Time date to match FedACH business day boundaries.
+            // CURRENT_DATE uses the PostgreSQL server's UTC date, which rolls at 00:00 UTC —
+            // 4–5 hours before FedACH's day boundary — causing file_id_modifier collisions
+            // in the overnight window.
             cmd.CommandText = @"
                 INSERT INTO ""AchDailyCounters"" (""Date"", ""Value"")
-                VALUES (CURRENT_DATE, 1)
+                VALUES ((NOW() AT TIME ZONE 'America/New_York')::date, 1)
                 ON CONFLICT (""Date"") DO UPDATE
                     SET ""Value"" = ""AchDailyCounters"".""Value"" + 1
+                WHERE ""AchDailyCounters"".""Value"" < 36
                 RETURNING ""Value""";
 
             var result = await cmd.ExecuteScalarAsync(ct);
+            if (result is null or DBNull)
+                throw new InvalidOperationException(
+                    "NACHA daily file limit reached (36 files today, max per spec). " +
+                    "Try again tomorrow or batch multiple entries per file to increase throughput.");
             return Convert.ToInt32(result);
         }
         finally

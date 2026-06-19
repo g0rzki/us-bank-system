@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
-using System.Net;
 using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Integrations.Sftp;
 
@@ -12,6 +11,18 @@ namespace UsBankSystem.Tests.Helpers;
 public class StubSftpService : ISftpService
 {
     public Task UploadAsync(string remotePath, byte[] content, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<byte[]?> DownloadAsync(string remotePath, CancellationToken ct = default) => Task.FromResult<byte[]?>(Array.Empty<byte>());
+    public Task<IEnumerable<string>> ListFilesAsync(string remoteDir, CancellationToken ct = default) => Task.FromResult<IEnumerable<string>>([]);
+    public Task DeleteAsync(string remotePath, CancellationToken ct = default) => Task.CompletedTask;
+}
+
+/// <summary>
+/// SFTP stub that throws on upload — simulates SFTP connectivity failure.
+/// </summary>
+public class FailingSftpService : ISftpService
+{
+    public Task UploadAsync(string remotePath, byte[] content, CancellationToken ct = default) =>
+        throw new IOException("SFTP upload failed (simulated)");
     public Task<byte[]?> DownloadAsync(string remotePath, CancellationToken ct = default) => Task.FromResult<byte[]?>(Array.Empty<byte>());
     public Task<IEnumerable<string>> ListFilesAsync(string remoteDir, CancellationToken ct = default) => Task.FromResult<IEnumerable<string>>([]);
     public Task DeleteAsync(string remotePath, CancellationToken ct = default) => Task.CompletedTask;
@@ -38,11 +49,9 @@ public static class AchTestHelpers
             })
             .Build();
 
-    public static AchGateway CreateGateway(HttpStatusCode statusCode, string responseBody) =>
+    public static AchGateway CreateGateway(bool sftpFails = false) =>
         new(
-            new HttpClient(new MockHttpMessageHandler(statusCode, responseBody))
-                { BaseAddress = new Uri("http://localhost:8310") },
-            new StubSftpService(),
+            sftpFails ? new FailingSftpService() : new StubSftpService(),
             new StubAchTraceSequencer(),
             AchConfig(),
             NullLogger<AchGateway>.Instance);

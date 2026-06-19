@@ -44,8 +44,7 @@ builder.Services.Configure<PaymentSessionConfig>(
     builder.Configuration.GetSection("PaymentSessions"));
 
 // Payment gateways — adresy z konfiguracji (env var lub .env); domyślnie mock stubs na localhost
-builder.Services.AddHttpClient<AchGateway>(c =>
-    c.BaseAddress = new Uri(builder.Configuration["Integrations:AchUrl"] ?? "http://localhost:8310"));
+builder.Services.AddScoped<AchGateway>();
 builder.Services.AddHttpClient<RtpGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpUrl"] ?? "http://localhost:6002"));
 builder.Services.AddHttpClient<FedNowGateway>(c =>

@@ -1,5 +1,3 @@
-using System.Net;
-using Microsoft.Extensions.Logging.Abstractions;
 using UsBankSystem.Api.Integrations;
 using UsBankSystem.Core.Domain;
 using UsBankSystem.Core.Domain.Transfers;
@@ -9,8 +7,8 @@ namespace UsBankSystem.Tests.Integrations;
 
 public class PaymentGatewayTests
 {
-    private static AchGateway CreateGateway(HttpStatusCode statusCode, string responseBody) =>
-        AchTestHelpers.CreateGateway(statusCode, responseBody);
+    private static AchGateway CreateGateway(bool sftpFails = false) =>
+        AchTestHelpers.CreateGateway(sftpFails);
 
     private static PaymentGatewayRequest CreateRequest(Guid? transferId = null) => new(
         TransferId: transferId ?? Guid.NewGuid(),
@@ -27,10 +25,10 @@ public class PaymentGatewayTests
     );
 
     [Fact]
-    public async Task SendAsync_SuccessResponse_ReturnsSuccess()
+    public async Task SendAsync_ValidRequest_ReturnsSuccess()
     {
         var transferId = Guid.NewGuid();
-        var gateway = CreateGateway(HttpStatusCode.OK, "NACHA_FILE_BYTES");
+        var gateway = CreateGateway();
         var result = await gateway.SendAsync(CreateRequest(transferId));
         Assert.True(result.Success);
         Assert.Equal(AchGateway.ComputeFileId(transferId), result.ExternalReferenceId);
@@ -38,9 +36,9 @@ public class PaymentGatewayTests
     }
 
     [Fact]
-    public async Task SendAsync_AchHelperFailure_ReturnsFailure()
+    public async Task SendAsync_SftpFailure_ReturnsFailure()
     {
-        var gateway = CreateGateway(HttpStatusCode.BadRequest, """{"error":"Invalid routing number"}""");
+        var gateway = CreateGateway(sftpFails: true);
         var result = await gateway.SendAsync(CreateRequest());
         Assert.False(result.Success);
         Assert.Null(result.ExternalReferenceId);
@@ -48,17 +46,9 @@ public class PaymentGatewayTests
     }
 
     [Fact]
-    public async Task SendAsync_AchHelperServerError_ReturnsFailure()
-    {
-        var gateway = CreateGateway(HttpStatusCode.InternalServerError, "");
-        var result = await gateway.SendAsync(CreateRequest());
-        Assert.False(result.Success);
-    }
-
-    [Fact]
     public async Task SendAsync_MissingMetadata_ReturnsValidationError()
     {
-        var gateway = CreateGateway(HttpStatusCode.OK, "NACHA_FILE_BYTES");
+        var gateway = CreateGateway();
         var request = new PaymentGatewayRequest(
             TransferId: Guid.NewGuid(), Amount: 100m, Currency: "USD", Description: null);
         var result = await gateway.SendAsync(request);
@@ -69,7 +59,7 @@ public class PaymentGatewayTests
     [Fact]
     public void AchGateway_Channel_IsAch()
     {
-        var gateway = CreateGateway(HttpStatusCode.OK, "{}");
+        var gateway = CreateGateway();
         Assert.Equal(TransferChannel.Ach, gateway.Channel);
     }
 }

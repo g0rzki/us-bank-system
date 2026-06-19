@@ -96,7 +96,7 @@ public abstract class PaymentServiceBase(AppDbContext db)
         RequiresApproval = transfer.RequiresApproval
     };
 
-    protected static Transaction CreateTransaction(Guid accountId, decimal amount, string type, string status, string description, Guid referenceTransferId) => new()
+    protected static Transaction CreateTransaction(Guid accountId, decimal amount, string type, string status, string description, Guid referenceTransferId, DateTime? createdAt = null) => new()
     {
         Id = Guid.NewGuid(),
         AccountId = accountId,
@@ -105,6 +105,6 @@ public abstract class PaymentServiceBase(AppDbContext db)
         Status = status,
         Description = description,
         ReferenceId = referenceTransferId.ToString(),
-        CreatedAt = DateTime.UtcNow
+        CreatedAt = createdAt ?? DateTime.UtcNow
     };
 }

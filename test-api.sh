@@ -112,6 +112,8 @@ TEST_ACCOUNT_ID=""; TEST_ACCOUNT_NUM=""
 TEST_CARD_DEBIT_ID=""; TEST_CARD_PREPAID_ID=""
 ACH_TR_ID=""; NEW_JUNIOR_ID=""
 ACH_HELPER_UP=false; SFTP_UP=false; CARDS_GW_UP=false
+JOHN_USER_ID=""
+KLIK_SECRET="${KLIK_WEBHOOK_SECRET:-changeme_klik_webhook_secret}"
 
 TS=$(date +%s)
 
@@ -293,6 +295,7 @@ section "5 · AUTH — me"
 
 R=$(req GET /auth/me -H "Authorization: Bearer ${TOKEN_JOHN}")
 check "GET /auth/me — poprawny token → 200" 200 "$(status "$R")"
+JOHN_USER_ID=$(jget "$(body "$R")" '.id')
 
 R=$(req GET /auth/me)
 check "GET /auth/me — brak tokenu → 401" 401 "$(status "$R")"
@@ -450,7 +453,7 @@ R=$(req GET "/transfers/${TR_ACH_PENDING}/status" -H "Authorization: Bearer ${TO
 check "GET /transfers/{id}/status — własny → 200" 200 "$(status "$R")"
 
 R=$(req GET "/transfers/${TR_ACH_PENDING}/status" -H "Authorization: Bearer ${TOKEN_JANE}")
-check "GET /transfers/{id}/status — cudzy → 401" 401 "$(status "$R")"
+check "GET /transfers/{id}/status — cudzy → 404" 404 "$(status "$R")"
 
 R=$(req GET "/transfers/00000000-0000-0000-0000-000000000000/status" -H "Authorization: Bearer ${TOKEN_JOHN}")
 check "GET /transfers/{id}/status — nie istnieje → 404" 404 "$(status "$R")"
@@ -618,7 +621,7 @@ if [ -n "$TOKEN_EMMA" ]; then
     \"recipientName\":\"Jane Doe\",
     \"amount\":1.00,\"currency\":\"USD\",\"description\":\"Junior ACH\"
   }")
-  check "POST /transfers/ach — junior → pending_approval (201, bez SFTP)" 201 "$(status "$R")" "$(body "$R")"
+  check "POST /transfers/ach — junior → 409 (zewnętrzny ACH zablokowany)" 409 "$(status "$R")" "$(body "$R")"
   info "Junior ACH status: $(jget "$(body "$R")" '.status')"
 else
   skip "POST /transfers/ach — junior pending_approval" "brak TOKEN_EMMA"
@@ -1166,6 +1169,176 @@ check "POST /transfers/swift — brak body → 400" 400 "$(status "$R")"
 
 R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}")
 check "POST /transfers/fednow — brak body → 400" 400 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "24 · BLIK — generowanie kodu i lista"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+R=$(req POST /blik/generate -H "Authorization: Bearer ${TOKEN_JOHN}" \
+  -d "{\"accountId\":\"${JOHN_CHECKING}\"}")
+check "POST /blik/generate — happy path → 201" 201 "$(status "$R")" "$(body "$R")"
+info "BLIK code: $(jget "$(body "$R")" '.code')"
+
+R=$(req POST /blik/generate -H "Authorization: Bearer ${TOKEN_JOHN}" \
+  -d "{\"accountId\":\"${JANE_CHECKING}\"}")
+check "POST /blik/generate — cudze konto → 401" 401 "$(status "$R")"
+
+R=$(req POST /blik/generate -H "Authorization: Bearer ${TOKEN_JOHN}" \
+  -d "{\"accountId\":\"00000000-0000-0000-0000-000000000000\"}")
+check "POST /blik/generate — konto nie istnieje → 404" 404 "$(status "$R")"
+
+R=$(req POST /blik/generate -d "{\"accountId\":\"${JOHN_CHECKING}\"}")
+check "POST /blik/generate — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req GET /blik/pending -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /blik/pending — john → 200" 200 "$(status "$R")"
+
+R=$(req GET /blik/pending)
+check "GET /blik/pending — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req GET /blik/transactions -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "GET /blik/transactions — john → 200" 200 "$(status "$R")"
+
+R=$(req GET /blik/transactions)
+check "GET /blik/transactions — brak tokenu → 401" 401 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "25 · KLIK WEBHOOK"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+EXPIRY_TIME=$($PY -c "from datetime import datetime,timedelta,timezone; print((datetime.now(timezone.utc)+timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))" 2>/dev/null || echo "2099-12-31T00:00:00Z")
+NOW_TS=$($PY -c "from datetime import datetime,timezone; print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))" 2>/dev/null || echo "2026-06-18T12:00:00Z")
+KLIK_TX_ID="tx-${TS}-1"
+
+R=$(req POST /klik/webhook/authorize \
+  -H "X-Webhook-Secret: ${KLIK_SECRET}" \
+  -d "{\"transaction_id\":\"${KLIK_TX_ID}\",\"user_id\":\"${JOHN_USER_ID}\",\"amount\":15.00,\"currency\":\"USD\",\"merchant_name\":\"Test Shop\",\"is_on_us\":false,\"expiry_time\":\"${EXPIRY_TIME}\",\"zone\":\"US\"}")
+check "POST /klik/webhook/authorize — happy path → 200" 200 "$(status "$R")"
+
+R=$(req POST /klik/webhook/authorize \
+  -H "X-Webhook-Secret: ${KLIK_SECRET}" \
+  -d "{\"transaction_id\":\"${KLIK_TX_ID}\",\"user_id\":\"${JOHN_USER_ID}\",\"amount\":15.00,\"currency\":\"USD\",\"merchant_name\":\"Test Shop\",\"is_on_us\":false,\"expiry_time\":\"${EXPIRY_TIME}\",\"zone\":\"US\"}")
+check "POST /klik/webhook/authorize — duplikat (idempotent) → 200" 200 "$(status "$R")"
+
+R=$(req POST /klik/webhook/authorize \
+  -H "X-Webhook-Secret: wrong_secret" \
+  -d "{\"transaction_id\":\"tx-bad-${TS}\",\"user_id\":\"${JOHN_USER_ID}\",\"amount\":10.00,\"currency\":\"USD\",\"merchant_name\":\"Shop\",\"is_on_us\":false,\"expiry_time\":\"${EXPIRY_TIME}\",\"zone\":\"US\"}")
+check "POST /klik/webhook/authorize — zły secret → 401" 401 "$(status "$R")"
+
+R=$(req POST /klik/webhook/authorize \
+  -d "{\"transaction_id\":\"tx-nosec-${TS}\",\"user_id\":\"${JOHN_USER_ID}\",\"amount\":10.00,\"currency\":\"USD\",\"merchant_name\":\"Shop\",\"is_on_us\":false,\"expiry_time\":\"${EXPIRY_TIME}\",\"zone\":\"US\"}")
+check "POST /klik/webhook/authorize — brak X-Webhook-Secret → 401" 401 "$(status "$R")"
+
+R=$(req POST /klik/webhook/authorize \
+  -H "X-Webhook-Secret: ${KLIK_SECRET}" \
+  -d "{\"transaction_id\":\"tx-nouser-${TS}\",\"user_id\":\"00000000-0000-0000-0000-000000000000\",\"amount\":10.00,\"currency\":\"USD\",\"merchant_name\":\"Shop\",\"is_on_us\":false,\"expiry_time\":\"${EXPIRY_TIME}\",\"zone\":\"US\"}")
+check "POST /klik/webhook/authorize — nieznany user_id → 404" 404 "$(status "$R")"
+
+R=$(req POST /klik/webhook/ping \
+  -H "X-Webhook-Secret: ${KLIK_SECRET}" \
+  -d "{\"timestamp\":\"${NOW_TS}\",\"nonce\":\"nonce-${TS}\"}")
+check "POST /klik/webhook/ping — happy path → 200" 200 "$(status "$R")"
+
+R=$(req POST /klik/webhook/ping \
+  -H "X-Webhook-Secret: wrong_secret" \
+  -d "{\"timestamp\":\"${NOW_TS}\",\"nonce\":\"abc\"}")
+check "POST /klik/webhook/ping — zły secret → 401" 401 "$(status "$R")"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section "26 · BLIK — pełny flow (generate → simulate/initiate → pending → approve/reject)"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Mock jest dostępny bezpośrednio z hosta na porcie 6006
+KLIK_MOCK_URL="${INTEGRATIONS_BLIK_URL_HOST:-http://localhost:6006}"
+
+mock_up() {
+  local code
+  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "${KLIK_MOCK_URL}/health" 2>/dev/null) || code="000"
+  [ "$code" != "000" ]
+}
+
+simulate_initiate() {
+  local code="$1" amount="$2" merchant="$3"
+  curl -s -X POST -H "Content-Type: application/json" \
+    -d "{\"code\":\"${code}\",\"amount\":${amount},\"currency\":\"USD\",\"merchant_name\":\"${merchant}\",\"is_on_us\":false}" \
+    "${KLIK_MOCK_URL}/simulate/initiate" 2>/dev/null
+}
+
+if [ -n "$JOHN_USER_ID" ] && mock_up; then
+
+  # --- Approve flow ---
+  R=$(req POST /blik/generate -H "Authorization: Bearer ${TOKEN_JOHN}" \
+    -d "{\"accountId\":\"${JOHN_CHECKING}\"}")
+  FLOW_CODE=$(jget "$(body "$R")" '.code')
+  info "Generated BLIK code: ${FLOW_CODE}"
+
+  if [ -n "$FLOW_CODE" ]; then
+    INIT_RESP=$(simulate_initiate "$FLOW_CODE" "5.00" "Flow Shop")
+    info "Simulate initiate: $(echo "$INIT_RESP" | head -c 80)"
+    sleep 1  # poczekaj na async webhook do naszego API
+
+    R=$(req GET /blik/pending -H "Authorization: Bearer ${TOKEN_JOHN}")
+    check "Pełny flow — GET /blik/pending → 200" 200 "$(status "$R")"
+    info "Oczekujące autoryzacje: $(jget "$(body "$R")" 'length')"
+
+    BLIK_AUTH_ID=$($PY -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')" 2>/dev/null <<< "$(body "$R")")
+
+    if [ -n "$BLIK_AUTH_ID" ]; then
+      R=$(req POST "/blik/${BLIK_AUTH_ID}/approve" -H "Authorization: Bearer ${TOKEN_JOHN}")
+      check "Pełny flow — approve → 200" 200 "$(status "$R")" "$(body "$R")"
+      info "Status po approve: $(jget "$(body "$R")" '.status')"
+
+      R=$(req POST "/blik/${BLIK_AUTH_ID}/approve" -H "Authorization: Bearer ${TOKEN_JOHN}")
+      check "Pełny flow — ponowny approve → 409" 409 "$(status "$R")"
+    else
+      skip "approve" "brak oczekującej autoryzacji (webhook nie dotarł?)"
+      skip "ponowny approve" "brak oczekującej autoryzacji"
+    fi
+  else
+    skip "approve flow" "nie udało się wygenerować kodu BLIK"
+    skip "ponowny approve" "nie udało się wygenerować kodu BLIK"
+  fi
+
+  # --- Reject flow ---
+  R=$(req POST /blik/generate -H "Authorization: Bearer ${TOKEN_JOHN}" \
+    -d "{\"accountId\":\"${JOHN_CHECKING}\"}")
+  REJECT_CODE=$(jget "$(body "$R")" '.code')
+
+  if [ -n "$REJECT_CODE" ]; then
+    simulate_initiate "$REJECT_CODE" "3.00" "Reject Shop" > /dev/null
+    sleep 1
+
+    R=$(req GET /blik/pending -H "Authorization: Bearer ${TOKEN_JOHN}")
+    REJECT_AUTH_ID=$($PY -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')" 2>/dev/null <<< "$(body "$R")")
+
+    if [ -n "$REJECT_AUTH_ID" ]; then
+      R=$(req POST "/blik/${REJECT_AUTH_ID}/reject" -H "Authorization: Bearer ${TOKEN_JOHN}")
+      check "Pełny flow — reject → 200" 200 "$(status "$R")"
+      info "Status po reject: $(jget "$(body "$R")" '.status')"
+    else
+      skip "reject" "brak oczekującej autoryzacji"
+    fi
+  else
+    skip "reject flow" "nie udało się wygenerować kodu BLIK"
+  fi
+
+  # --- Not found ---
+  R=$(req POST "/blik/00000000-0000-0000-0000-000000000000/approve" -H "Authorization: Bearer ${TOKEN_JOHN}")
+  check "POST /blik/{id}/approve — nie istnieje → 404" 404 "$(status "$R")"
+
+  R=$(req POST "/blik/00000000-0000-0000-0000-000000000000/reject" -H "Authorization: Bearer ${TOKEN_JOHN}")
+  check "POST /blik/{id}/reject — nie istnieje → 404" 404 "$(status "$R")"
+
+  # --- Historia po flow ---
+  R=$(req GET /blik/transactions -H "Authorization: Bearer ${TOKEN_JOHN}")
+  check "GET /blik/transactions — po flow → 200" 200 "$(status "$R")"
+  info "BLIK historia: $(jget "$(body "$R")" 'length') rekordów"
+
+elif [ -z "$JOHN_USER_ID" ]; then
+  skip "pełny BLIK flow — wszystkie" "brak JOHN_USER_ID"
+else
+  skip "pełny BLIK flow — wszystkie" "KLIK mock (${KLIK_MOCK_URL}) niedostępny"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PODSUMOWANIE

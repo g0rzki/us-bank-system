@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using UsBankSystem.Core.Domain.Transactions;
 using UsBankSystem.Core.Entities;
 using UsBankSystem.Infrastructure.Persistence;
@@ -25,10 +26,17 @@ public class IncomingTransferProcessor(IServiceScopeFactory scopeFactory, ILogge
                 await CreditAccountAsync(db, entry, ct);
                 await db.SaveChangesAsync(ct);
             }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg && pg.SqlState == "23505")
+            {
+                // Unique constraint violation on IX_Transactions_ReferenceId_AccountId:
+                // another pod already credited this entry — this is expected under concurrent polling.
+                logger.LogDebug("Incoming transfer {ExternalRef} already credited (duplicate blocked by DB constraint)", entry.ExternalRef);
+                db.ChangeTracker.Clear();
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to credit account for incoming entry {ExternalRef}, skipping", entry.ExternalRef);
-                db.ChangeTracker.Clear(); // discard partial changes so next entry starts clean
+                db.ChangeTracker.Clear();
             }
         }
     }

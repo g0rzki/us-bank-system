@@ -42,16 +42,13 @@ public class CreateAchTransferTests
         	FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
         });
 
-    private static AchGateway CreateGateway(HttpStatusCode statusCode, string body) =>
-        AchTestHelpers.CreateGateway(statusCode, body);
-
-    private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode gatewayStatus = HttpStatusCode.OK)
+    private TransfersController CreateController(AppDbContext db, Guid userId, bool gatewayFails = false)
     {
-        var gateway = CreateGateway(gatewayStatus, """{"referenceId":"ACH-REF-001"}""");
-		var rtpGateway = new RtpGateway(
-        	new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
-            	{ BaseAddress = new Uri("http://localhost:6002") },
-        	NullLogger<RtpGateway>.Instance);
+        var gateway = AchTestHelpers.CreateGateway(gatewayFails);
+        var rtpGateway = new RtpGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
+                { BaseAddress = new Uri("http://localhost:6002") },
+            NullLogger<RtpGateway>.Instance);
 		var fedNowGateway = new FedNowGateway(
         	new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
             	{ BaseAddress = new Uri("http://localhost:6003") },
@@ -165,7 +162,7 @@ public class CreateAchTransferTests
     public async Task CreateAch_GatewayFailure_ThrowsAndReleasesReservation()
     {
         var (db, userId, accountId) = await Setup();
-        var controller = CreateController(db, userId, HttpStatusCode.BadRequest);
+        var controller = CreateController(db, userId, gatewayFails: true);
         await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateAch(new CreateAchTransferRequest
         {
             FromAccountId = accountId,
