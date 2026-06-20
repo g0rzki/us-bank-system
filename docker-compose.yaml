@@ -32,9 +32,9 @@ services:
       - Jwt__Secret=${JWT_SECRET}
       - Webhook__Secret=${WEBHOOK_SECRET}
       - Cors__Origin=http://localhost:${FRONTEND_PORT}
-      - Integrations__AchUrl=http://mock-gateways:6001
       - Integrations__RtpUrl=http://mock-gateways:6002
-      - Integrations__FedNowUrl=http://mock-gateways:6003
+      - Integrations__RtpTchUrl=${INTEGRATIONS_RTP_TCH_URL:-http://host.docker.internal:8000}
+      - Rtp__ApiKey=${Rtp__ApiKey:-}
       - Integrations__FedNowMqUrl=${INTEGRATIONS_FEDNOW_MQ_URL:-http://host.docker.internal:8770}
       - Integrations__SwiftUrl=${INTEGRATIONS_SWIFT_URL:-http://host.docker.internal:3000}
       - Swift__ClientId=${Swift__ClientId:-test-client}

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -74,7 +74,8 @@ public class CreateFedNowTransferTests
     private static RtpTchGateway CreateRtpTchGateway() =>
         new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "<xml/>"))
             { BaseAddress = new Uri("http://localhost:8200") },
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        new RtpApiKeyStore(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
         NullLogger<RtpTchGateway>.Instance);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode mqStatus = HttpStatusCode.OK)
@@ -259,3 +260,4 @@ public class CreateFedNowTransferTests
         Assert.Null(transfer.ToAccountId);
     }
 }
+

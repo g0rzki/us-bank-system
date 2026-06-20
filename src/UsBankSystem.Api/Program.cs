@@ -62,8 +62,10 @@ builder.Services.AddSingleton<Pacs002Builder>();
 builder.Services.AddSingleton<Pain013Parser>();
 builder.Services.AddSingleton<Pain014Builder>();
 builder.Services.AddHostedService<FedNowPollingService>();
+builder.Services.AddSingleton<RtpApiKeyStore>();
+builder.Services.AddHostedService<RtpTchRegistrationService>();
 builder.Services.AddHttpClient<RtpTchGateway>(c =>
-    c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpTchUrl"] ?? "http://localhost:8200"));
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpTchUrl"] ?? "http://localhost:8000"));
 builder.Services.AddHostedService<RtpPollingService>();
 builder.Services.AddHttpClient<SwiftGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:SwiftUrl"] ?? "http://localhost:3000"));

@@ -4,9 +4,9 @@ using System.Text.Json.Serialization;
 
 namespace UsBankSystem.Api.Integrations.Rtp;
 
-public class RtpTchGateway(HttpClient httpClient, IConfiguration configuration, ILogger<RtpTchGateway> logger)
+public class RtpTchGateway(HttpClient httpClient, RtpApiKeyStore keyStore, IConfiguration configuration, ILogger<RtpTchGateway> logger)
 {
-    private string ApiKey => configuration["Rtp:ApiKey"] ?? "";
+    private string ApiKey => keyStore.HasKey ? keyStore.ApiKey : (configuration["Rtp:ApiKey"] ?? "");
 
     public async Task<RtpSendResult> SendPacs008Async(string xml, CancellationToken ct = default)
     {

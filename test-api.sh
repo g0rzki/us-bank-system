@@ -561,11 +561,9 @@ section "12 · TRANSFERS — ACH (pełne pokrycie)"
 # Jeśli ACH helper lub SFTP niedostępny → transfer.Status=Failed → API zwraca 400.
 
 if $ACH_HELPER_UP && $SFTP_UP; then
-  info "ACH Helper i SFTP UP — testy happy path oczekują 201"
-  ACH_E2E=true
+  info "ACH Helper i SFTP UP — happy path 201|400 (400 = NACHA daily limit 36/dzień)"
 else
-  info "ACH Helper=$ACH_HELPER_UP / SFTP=$SFTP_UP — happy path = check_any 201|400"
-  ACH_E2E=false
+  info "ACH Helper=$ACH_HELPER_UP / SFTP=$SFTP_UP — offline, happy path = 201|400"
 fi
 
 # --- Happy path: checking ---
@@ -576,13 +574,9 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"recipientName\":\"Jane Doe\",
   \"amount\":50.00,\"currency\":\"USD\",\"description\":\"ACH test\"
 }")
-if $ACH_E2E; then
-  check "POST /transfers/ach — checking → 201" 201 "$(status "$R")" "$(body "$R")"
-else
-  check_any "POST /transfers/ach — checking (e2e off) → 201|400" "201|400" "$(status "$R")" "$(body "$R")"
-fi
+check_any "POST /transfers/ach — checking → 201|400 (daily limit max 36/dzień)" "201|400" "$(status "$R")" "$(body "$R")"
 ACH_TR_ID=$(jget "$(body "$R")" '.id')
-info "ACH transfer ID: ${ACH_TR_ID:-brak}"
+info "ACH transfer ID: ${ACH_TR_ID:-brak (daily limit wyczerpany)}"
 
 # --- Happy path: savings ---
 R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
@@ -592,11 +586,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"recipientName\":\"Jane Doe\",
   \"amount\":25.00,\"currency\":\"USD\",\"description\":\"ACH savings\"
 }")
-if $ACH_E2E; then
-  check "POST /transfers/ach — savings account → 201" 201 "$(status "$R")"
-else
-  check_any "POST /transfers/ach — savings account → 201|400" "201|400" "$(status "$R")"
-fi
+check_any "POST /transfers/ach — savings account → 201|400" "201|400" "$(status "$R")"
 
 # --- Minimalny amount (0.01) ---
 R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
@@ -606,11 +596,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"recipientName\":\"Jane Doe\",
   \"amount\":0.01,\"currency\":\"USD\"
 }")
-if $ACH_E2E; then
-  check "POST /transfers/ach — amount=0.01 (minimum) → 201" 201 "$(status "$R")"
-else
-  check_any "POST /transfers/ach — amount=0.01 → 201|400" "201|400" "$(status "$R")"
-fi
+check_any "POST /transfers/ach — amount=0.01 (minimum) → 201|400" "201|400" "$(status "$R")"
 
 # --- Bez description (opcjonalne) ---
 R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
@@ -620,11 +606,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"recipientName\":\"Jane Doe\",
   \"amount\":5.00,\"currency\":\"USD\"
 }")
-if $ACH_E2E; then
-  check "POST /transfers/ach — bez description → 201" 201 "$(status "$R")"
-else
-  check_any "POST /transfers/ach — bez description → 201|400" "201|400" "$(status "$R")"
-fi
+check_any "POST /transfers/ach — bez description → 201|400" "201|400" "$(status "$R")"
 
 # --- Długi description (AchGateway truncuje do 22 znaków w NACHA) ---
 R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
@@ -635,11 +617,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"amount\":5.00,\"currency\":\"USD\",
   \"description\":\"Very long description exceeding the 22-char NACHA field limit\"
 }")
-if $ACH_E2E; then
-  check "POST /transfers/ach — długi description (truncated w NACHA) → 201" 201 "$(status "$R")"
-else
-  check_any "POST /transfers/ach — długi description → 201|400" "201|400" "$(status "$R")"
-fi
+check_any "POST /transfers/ach — długi description → 201|400" "201|400" "$(status "$R")"
 
 # --- Junior tworzy ACH → pending_approval (nie idzie do SFTP, zawsze 201) ---
 if [ -n "$TOKEN_EMMA" ]; then
@@ -800,14 +778,33 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 section "13 · TRANSFERS — RTP"
 # ═══════════════════════════════════════════════════════════════════════════════
+# RTP ma dwa tryby:
+#   internal — brak toRoutingNumber → trafia do RtpGateway (mock port 6002)
+#   external — z toRoutingNumber   → trafia do RtpTchGateway (TCH, localhost:8200)
 
+RTP_TR_ID=""
+
+# ── Happy path internal (do konta w banku, przez mock) ────────────────────────
 R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
   \"amount\":5.00,\"currency\":\"USD\",\"description\":\"RTP test\"
 }")
-check "POST /transfers/rtp — happy path → 201" 201 "$(status "$R")"
+check "POST /transfers/rtp — internal happy path → 201" 201 "$(status "$R")"
+RTP_TR_ID=$(jget "$(body "$R")" '.id')
+info "RTP transfer ID: ${RTP_TR_ID:-brak}"
 
+# ── Happy path external (z toRoutingNumber → TCH, może być niedostępne) ──────
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"987654321\",
+  \"toRoutingNumber\":\"021000021\",
+  \"recipientName\":\"Jane Doe\",
+  \"amount\":2.00,\"currency\":\"USD\",\"description\":\"RTP external\"
+}")
+check_any "POST /transfers/rtp — external (TCH) → 201|400 (TCH może być off)" "201|400" "$(status "$R")"
+
+# ── Walidacja kwoty ───────────────────────────────────────────────────────────
 R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
@@ -816,14 +813,116 @@ R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
 check "POST /transfers/rtp — ujemna kwota → 400" 400 "$(status "$R")"
 
 R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
-  \"fromAccountId\":\"${JOHN_CHECKING}\",\"amount\":25.00
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":0
+}")
+check "POST /transfers/rtp — kwota = 0 → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":0.001
+}")
+check "POST /transfers/rtp — amount=0.001 (poniżej minimum) → 400" 400 "$(status "$R")"
+
+# ── Walidacja waluty ──────────────────────────────────────────────────────────
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":5.00,\"currency\":\"EUR\"
+}")
+check "POST /transfers/rtp — waluta EUR → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":5.00,\"currency\":\"GBP\"
+}")
+check "POST /transfers/rtp — waluta GBP → 400" 400 "$(status "$R")"
+
+# ── Saldo / konto źródłowe ────────────────────────────────────────────────────
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_BOB}" -d "{
+  \"fromAccountId\":\"${BOB_CHECKING}\",
+  \"toAccountNumber\":\"${JOHN_CHECKING_NUM}\",
+  \"amount\":99999.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/rtp — brak środków → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"00000000-0000-0000-0000-000000000000\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":5.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/rtp — fromAccountId nie istnieje → 404" 404 "$(status "$R")"
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JANE_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"amount\":5.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/rtp — cudze fromAccountId → 404" 404 "$(status "$R")"
+
+# ── Internal — błędy na koncie docelowym ─────────────────────────────────────
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JOHN_CHECKING_NUM}\",
+  \"amount\":5.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/rtp — internal to samo konto → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"9999999999\",
+  \"amount\":5.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/rtp — internal nieznany numer konta → 404" 404 "$(status "$R")"
+
+# ── Pola wymagane ─────────────────────────────────────────────────────────────
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",\"amount\":5.00
 }")
 check "POST /transfers/rtp — brak toAccountNumber → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",\"amount\":5.00
+}")
+check_any "POST /transfers/rtp — brak fromAccountId → 400|404" "400|404" "$(status "$R")"
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+R=$(req POST /transfers/rtp -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
+  \"amount\":5.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/rtp — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "POST /transfers/rtp — brak body → 400" 400 "$(status "$R")"
+
+# ── Status po utworzeniu ──────────────────────────────────────────────────────
+if [ -n "$RTP_TR_ID" ]; then
+  R=$(req GET "/transfers/${RTP_TR_ID}/status" -H "Authorization: Bearer ${TOKEN_JOHN}")
+  check "GET /transfers/{rtpId}/status — po wysłaniu → 200" 200 "$(status "$R")"
+  info "RTP status: $(jget "$(body "$R")" '.status')"
+else
+  skip "GET /transfers/{rtpId}/status" "brak RTP_TR_ID"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 section "14 · TRANSFERS — FedNow"
 # ═══════════════════════════════════════════════════════════════════════════════
+# FedNow wysyła pacs.008 przez FedNow MQ Gateway (INTEGRATIONS_FEDNOW_MQ_URL).
+# Jeśli zewnętrzny FedSystems niedostępny → transfer.Status=Failed → 400.
 
+FEDNOW_TR_ID=""
+
+fednow_check() {
+  local desc="$1" st="$2" bd="${3:-}"
+  check_any "${desc} → 201|400 (MQ może być off)" "201|400" "${st}" "${bd}"
+}
+
+# ── Happy path ────────────────────────────────────────────────────────────────
 R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
@@ -831,13 +930,128 @@ R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"amount\":15.00,\"currency\":\"USD\"
 }")
 check "POST /transfers/fednow — happy path → 201" 201 "$(status "$R")"
+FEDNOW_TR_ID=$(jget "$(body "$R")" '.id')
+info "FedNow transfer ID: ${FEDNOW_TR_ID:-brak}"
 
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"987654321\",
+  \"toRoutingNumber\":\"021000021\",
+  \"recipientName\":\"Jane Doe\",
+  \"amount\":0.01,\"currency\":\"USD\",\"description\":\"FedNow min amount\"
+}")
+fednow_check "POST /transfers/fednow — amount=0.01 (min) z recipientName+opis" "$(status "$R")"
+
+# ── Saldo ─────────────────────────────────────────────────────────────────────
 R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_BOB}" -d "{
   \"fromAccountId\":\"${BOB_CHECKING}\",
   \"toAccountNumber\":\"${JOHN_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
   \"amount\":99999.00
 }")
 check "POST /transfers/fednow — brak środków → 400" 400 "$(status "$R")"
+
+# ── Walidacja pól wymaganych ──────────────────────────────────────────────────
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/fednow — brak toRoutingNumber → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/fednow — brak toAccountNumber → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check_any "POST /transfers/fednow — brak fromAccountId → 400|404" "400|404" "$(status "$R")"
+
+# ── Walidacja kwoty ───────────────────────────────────────────────────────────
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":0,\"currency\":\"USD\"
+}")
+check "POST /transfers/fednow — kwota = 0 → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":-5.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/fednow — ujemna kwota → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":0.001,\"currency\":\"USD\"
+}")
+check "POST /transfers/fednow — amount=0.001 (poniżej minimum) → 400" 400 "$(status "$R")"
+
+# ── Walidacja waluty ──────────────────────────────────────────────────────────
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":10.00,\"currency\":\"EUR\"
+}")
+check "POST /transfers/fednow — waluta EUR → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":10.00,\"currency\":\"GBP\"
+}")
+check "POST /transfers/fednow — waluta GBP → 400" 400 "$(status "$R")"
+
+# ── Konto źródłowe ────────────────────────────────────────────────────────────
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"00000000-0000-0000-0000-000000000000\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/fednow — fromAccountId nie istnieje → 404" 404 "$(status "$R")"
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JANE_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/fednow — cudze fromAccountId → 404" 404 "$(status "$R")"
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+R=$(req POST /transfers/fednow -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
+  \"amount\":10.00,\"currency\":\"USD\"
+}")
+check "POST /transfers/fednow — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "POST /transfers/fednow — brak body → 400" 400 "$(status "$R")"
+
+# ── Status po utworzeniu ──────────────────────────────────────────────────────
+if [ -n "$FEDNOW_TR_ID" ]; then
+  R=$(req GET "/transfers/${FEDNOW_TR_ID}/status" -H "Authorization: Bearer ${TOKEN_JOHN}")
+  check "GET /transfers/{fednowId}/status — po wysłaniu → 200" 200 "$(status "$R")"
+  info "FedNow status: $(jget "$(body "$R")" '.status')"
+else
+  skip "GET /transfers/{fednowId}/status" "brak FEDNOW_TR_ID"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 section "15 · TRANSFERS — SWIFT"
@@ -1213,11 +1427,11 @@ if [ -n "$ACH_TR_ID" ]; then
   if [ "$WH_STATUS" = "pending" ] || [ "$WH_STATUS" = "processing" ]; then
     R=$(req POST "/transfers/${ACH_TR_ID}/webhook" \
       -H "X-Webhook-Secret: ${WEBHOOK_SECRET}" \
-      -d '{"status":"completed","referenceId":"ACH-DONE"}')
+      -d "{\"status\":\"completed\",\"referenceId\":\"ACH-DONE-${TS}\"}")
     check "POST /transfers/{id}/webhook — completed → 200" 200 "$(status "$R")" "$(body "$R")"
     R=$(req POST "/transfers/${ACH_TR_ID}/webhook" \
       -H "X-Webhook-Secret: ${WEBHOOK_SECRET}" \
-      -d '{"status":"completed","referenceId":"ACH-DONE"}')
+      -d "{\"status\":\"completed\",\"referenceId\":\"ACH-DONE-${TS}\"}")
     check "POST /transfers/{id}/webhook — już sfinalizowany → 400" 400 "$(status "$R")"
   else
     skip "webhook — completed" "ACH transfer w stanie '${WH_STATUS}' (nie pending)"
@@ -1545,6 +1759,30 @@ R=$(req POST /klik/webhook/ping \
   -H "X-Webhook-Secret: wrong_secret" \
   -d "{\"timestamp\":\"${NOW_TS}\",\"nonce\":\"abc\"}")
 check "POST /klik/webhook/ping — zły secret → 401" 401 "$(status "$R")"
+
+# BLIK — autoryzacja bezpieczeństwa: cudzy użytkownik nie może zatwierdzić
+# Webhook authorize dla john stworzył pending BlikAuthorization.
+# DecideAsync filtruje po userId — więc jane dostaje 404 (nie ujawniamy że istnieje).
+if [ -n "$JOHN_USER_ID" ]; then
+  BLIK_PENDING_R=$(req GET /blik/pending -H "Authorization: Bearer ${TOKEN_JOHN}")
+  if [ -n "$PY" ]; then
+    JOHN_BLIK_AUTH=$($PY -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')" 2>/dev/null <<< "$(body "$BLIK_PENDING_R")")
+  else
+    JOHN_BLIK_AUTH=$(printf '%s' "$(body "$BLIK_PENDING_R")" | grep -oE '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"//')
+  fi
+  if [ -n "$JOHN_BLIK_AUTH" ]; then
+    R=$(req POST "/blik/${JOHN_BLIK_AUTH}/approve" -H "Authorization: Bearer ${TOKEN_JANE}")
+    check "POST /blik/{john's auth}/approve — jane → 404 (nie jej autoryzacja)" 404 "$(status "$R")"
+    R=$(req POST "/blik/${JOHN_BLIK_AUTH}/reject" -H "Authorization: Bearer ${TOKEN_JANE}")
+    check "POST /blik/{john's auth}/reject — jane → 404 (nie jej autoryzacja)" 404 "$(status "$R")"
+  else
+    skip "BLIK cross-user approve" "brak oczekujących autoryzacji u john"
+    skip "BLIK cross-user reject" "brak oczekujących autoryzacji u john"
+  fi
+else
+  skip "BLIK cross-user approve" "brak JOHN_USER_ID"
+  skip "BLIK cross-user reject" "brak JOHN_USER_ID"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 section "26 · BLIK — pełny flow (generate → simulate/initiate → pending → approve/reject)"

@@ -1,8 +1,9 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -27,6 +28,7 @@ public class CreateSwiftTransferTests
     private AppDbContext CreateDb() =>
         new(new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options);
 
     private IConfiguration CreateConfig() =>
@@ -72,7 +74,8 @@ public class CreateSwiftTransferTests
     private static RtpTchGateway CreateRtpTchGateway() =>
         new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "<xml/>"))
             { BaseAddress = new Uri("http://localhost:8200") },
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        new RtpApiKeyStore(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
         NullLogger<RtpTchGateway>.Instance);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode swiftStatus = HttpStatusCode.OK, decimal swiftDailyLimit = 50_000m)
@@ -298,5 +301,6 @@ public class CreateSwiftTransferTests
         Assert.Equal(0m, account!.ReservedBalance);
     }
 }
+
 
 

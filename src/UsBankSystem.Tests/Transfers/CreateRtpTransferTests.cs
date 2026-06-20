@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
@@ -57,7 +57,8 @@ public class CreateRtpTransferTests
     private static RtpTchGateway CreateRtpTchGateway(HttpStatusCode statusCode = HttpStatusCode.OK) =>
         new(new HttpClient(new MockHttpMessageHandler(statusCode, "<xml/>"))
             { BaseAddress = new Uri("http://localhost:8200") },
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        new RtpApiKeyStore(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
         NullLogger<RtpTchGateway>.Instance);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode rtpStatus = HttpStatusCode.OK, HttpStatusCode rtpTchStatus = HttpStatusCode.OK)
@@ -77,6 +78,7 @@ public class CreateRtpTransferTests
             NullLogger<SwiftGateway>.Instance);
         var rtpTchGateway = new RtpTchGateway(
             new HttpClient(rtpTchHandler) { BaseAddress = new Uri("http://localhost:8200") },
+            new RtpApiKeyStore(),
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
             NullLogger<RtpTchGateway>.Instance);
         var internalPayment = new InternalPaymentService(db);
@@ -363,4 +365,5 @@ public class CreateRtpTransferTests
         Assert.Equal("BANKA", cdtrAgtNm);
     }
 }
+
 

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -52,7 +52,8 @@ public class ApproveRejectTransferTests
     private static RtpTchGateway CreateRtpTchGateway(HttpStatusCode statusCode = HttpStatusCode.OK) =>
         new(new HttpClient(new MockHttpMessageHandler(statusCode, "<xml/>"))
             { BaseAddress = new Uri("http://localhost:8200") },
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        new RtpApiKeyStore(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
         NullLogger<RtpTchGateway>.Instance);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode mqStatus = HttpStatusCode.OK, HttpStatusCode rtpTchStatus = HttpStatusCode.OK)
@@ -77,6 +78,7 @@ public class ApproveRejectTransferTests
             NullLogger<SwiftGateway>.Instance);
         var rtpTchGateway = new RtpTchGateway(
             new HttpClient(rtpTchHandler) { BaseAddress = new Uri("http://localhost:8200") },
+            new RtpApiKeyStore(),
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
             NullLogger<RtpTchGateway>.Instance);
 
@@ -421,5 +423,6 @@ public class ApproveRejectTransferTests
         Assert.Equal(0m, junior.ReservedBalance);
     }
 }
+
 
 

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -68,6 +68,7 @@ public class GetPendingApprovalTests
         var rtpTchGateway = new RtpTchGateway(
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "<xml/>"))
                 { BaseAddress = new Uri("http://localhost:8200") },
+            new RtpApiKeyStore(),
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
             NullLogger<RtpTchGateway>.Instance);
 
@@ -314,5 +315,6 @@ public class GetPendingApprovalTests
         Assert.Equal(juniorAccountNumber, list[0].FromAccountNumber);
     }
 }
+
 
 
