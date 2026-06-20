@@ -106,6 +106,7 @@ docker-compose.override.yml
 # ========================
 # SECRETS & ENVIRONMENT
 # ========================
+sftp_keys/
 .env
 .env.local
 .env.*.local
@@ -134,3 +135,4 @@ desktop.ini
 *.swp
 *.bak
 *.tmp
+review-ach-pr49.md

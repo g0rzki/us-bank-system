@@ -10,6 +10,8 @@ using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Integrations;
+using UsBankSystem.Api.Integrations.FedNow;
+using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Services;
@@ -39,8 +41,8 @@ public class CreateSwiftTransferTests
         Options.Create(new PaymentSessionConfig
         {
             Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
-            Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
-            FedNow = new TimeoutConfig { TimeoutSeconds = 10 },
+            Rtp = new RtpConfig { TimeoutSeconds = 10 },
+            FedNow = new FedNowConfig { TimeoutSeconds = 10, PollIntervalSeconds = 1, BankRtn = "040104018", BankLegalName = "Baguette Bank" },
             Swift = new SwiftConfig { TimeoutSeconds = 10, DailyLimitPerAccount = swiftDailyLimit }
         });
 
@@ -52,10 +54,10 @@ public class CreateSwiftTransferTests
             { BaseAddress = new Uri("http://localhost:6002") },
             NullLogger<RtpGateway>.Instance);
 
-    private static FedNowGateway CreateFedNowGateway() =>
-        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
-            { BaseAddress = new Uri("http://localhost:6003") },
-            NullLogger<FedNowGateway>.Instance);
+    private static FedNowMqGateway CreateMqGateway() =>
+        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"status":"sent"}"""))
+            { BaseAddress = new Uri("http://localhost:8770") },
+            NullLogger<FedNowMqGateway>.Instance);
 
     private static SwiftGateway CreateSwiftGateway(HttpStatusCode swiftStatusCode) =>
         new(new HttpClient(new RoutingMockHttpMessageHandler(
@@ -67,14 +69,21 @@ public class CreateSwiftTransferTests
             Options.Create(new SwiftOptions()),
             NullLogger<SwiftGateway>.Instance);
 
+    private static RtpTchGateway CreateRtpTchGateway() =>
+        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "<xml/>"))
+            { BaseAddress = new Uri("http://localhost:8200") },
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        NullLogger<RtpTchGateway>.Instance);
+
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode swiftStatus = HttpStatusCode.OK, decimal swiftDailyLimit = 50_000m)
     {
+        var rtpTchGateway = CreateRtpTchGateway();
         var internalPayment = new InternalPaymentService(db);
         var achPayment = new AchPaymentService(db, CreateAchGateway(), CreatePaymentConfig(swiftDailyLimit));
-        var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(), CreatePaymentConfig(swiftDailyLimit));
-        var fedNowPayment = new FedNowPaymentService(db, CreateFedNowGateway(), CreatePaymentConfig(swiftDailyLimit));
+        var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
+        var fedNowPayment = new FedNowPaymentService(db, CreateMqGateway(), new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
         var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(swiftStatus), CreatePaymentConfig(swiftDailyLimit));
-        var transferService = new TransferService(db);
+        var transferService = new TransferService(db, CreateMqGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
         var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using UsBankSystem.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using UsBankSystem.Infrastructure.Persistence;
 namespace UsBankSystem.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260618204136_AddTransferRoutingAndRecipient")]
+    partial class AddTransferRoutingAndRecipient
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -374,7 +377,7 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.Property<string>("ExternalReferenceId")
                         .HasColumnType("text");
 
-                    b.Property<Guid?>("FromAccountId")
+                    b.Property<Guid>("FromAccountId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("RecipientName")
@@ -394,9 +397,6 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("ToAccountNumber")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ToBankCode")
                         .HasColumnType("text");
 
                     b.Property<string>("ToRoutingNumber")
@@ -551,7 +551,8 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.HasOne("UsBankSystem.Core.Entities.Account", "FromAccount")
                         .WithMany("Transfers")
                         .HasForeignKey("FromAccountId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("UsBankSystem.Core.Entities.Account", "ToAccount")
                         .WithMany()

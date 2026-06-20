@@ -103,10 +103,12 @@ public class CardService(AppDbContext db, CardsGateway cardsGateway, ILogger<Car
         if (card.Status == request.Status)
             throw new InvalidOperationException($"Card is already {request.Status}");
 
-        if (request.Status == CardStatus.Active && card.Status == CardStatus.Blocked
-            && card.BlockedAt.HasValue
-            && (DateTime.UtcNow - card.BlockedAt.Value).TotalHours < 24)
-            throw new InvalidOperationException("Card cannot be unblocked within 24 hours of being blocked");
+        if (request.Status == CardStatus.Active && card.BlockedAt.HasValue)
+        {
+            var unblockAvailableAt = card.BlockedAt.Value.AddHours(24);
+            if (DateTime.UtcNow < unblockAvailableAt)
+                throw new InvalidOperationException($"Card cannot be unblocked until {unblockAvailableAt:O}");
+        }
 
         if (card.ExternalCardToken is not null)
         {

@@ -62,6 +62,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(t => t.FromAccount)
              .WithMany(a => a.Transfers)
              .HasForeignKey(t => t.FromAccountId)
+             .IsRequired(false)
              .OnDelete(DeleteBehavior.Restrict);
             e.HasOne(t => t.ToAccount)
              .WithMany()

@@ -6,6 +6,8 @@ using Microsoft.Extensions.Caching.Memory;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Extensions;
 using UsBankSystem.Api.Integrations;
+using UsBankSystem.Api.Integrations.FedNow;
+using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Integrations.Sftp;
 using UsBankSystem.Api.Middleware;
 using UsBankSystem.Api.Services;
@@ -51,8 +53,18 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<AchGateway>();
 builder.Services.AddHttpClient<RtpGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpUrl"] ?? "http://localhost:6002"));
-builder.Services.AddHttpClient<FedNowGateway>(c =>
-    c.BaseAddress = new Uri(builder.Configuration["Integrations:FedNowUrl"] ?? "http://localhost:6003"));
+builder.Services.AddHttpClient<FedNowMqGateway>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:FedNowMqUrl"] ?? "http://localhost:8770"));
+builder.Services.AddSingleton<Pacs008Builder>();
+builder.Services.AddSingleton<Pacs002Parser>();
+builder.Services.AddSingleton<Pacs008Parser>();
+builder.Services.AddSingleton<Pacs002Builder>();
+builder.Services.AddSingleton<Pain013Parser>();
+builder.Services.AddSingleton<Pain014Builder>();
+builder.Services.AddHostedService<FedNowPollingService>();
+builder.Services.AddHttpClient<RtpTchGateway>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpTchUrl"] ?? "http://localhost:8200"));
+builder.Services.AddHostedService<RtpPollingService>();
 builder.Services.AddHttpClient<SwiftGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:SwiftUrl"] ?? "http://localhost:3000"));
 builder.Services.AddHttpClient<CardsGateway>(c =>

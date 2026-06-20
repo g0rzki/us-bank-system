@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -10,6 +10,8 @@ using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Integrations;
+using UsBankSystem.Api.Integrations.FedNow;
+using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Services;
@@ -39,8 +41,14 @@ public class CreateFedNowTransferTests
         Options.Create(new PaymentSessionConfig
         {
             Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
-            Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
-            FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
+            Rtp = new RtpConfig { TimeoutSeconds = 10 },
+            FedNow = new FedNowConfig
+            {
+                TimeoutSeconds = 10,
+                PollIntervalSeconds = 1,
+                BankRtn = "040104018",
+                BankLegalName = "Baguette Bank"
+            }
         });
 
     private static AchGateway CreateAchGateway() =>
@@ -51,10 +59,10 @@ public class CreateFedNowTransferTests
             { BaseAddress = new Uri("http://localhost:6002") },
             NullLogger<RtpGateway>.Instance);
 
-    private static FedNowGateway CreateFedNowGateway(HttpStatusCode statusCode) =>
-        new(new HttpClient(new MockHttpMessageHandler(statusCode, """{"referenceId":"FEDNOW-REF-001"}"""))
-            { BaseAddress = new Uri("http://localhost:6003") },
-            NullLogger<FedNowGateway>.Instance);
+    private static FedNowMqGateway CreateMqGateway(HttpStatusCode statusCode = HttpStatusCode.OK) =>
+        new(new HttpClient(new MockHttpMessageHandler(statusCode, """{"status":"sent"}"""))
+            { BaseAddress = new Uri("http://localhost:8770") },
+            NullLogger<FedNowMqGateway>.Instance);
 
     private static SwiftGateway CreateSwiftGateway() =>
         new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
@@ -63,14 +71,21 @@ public class CreateFedNowTransferTests
             Options.Create(new SwiftOptions()),
             NullLogger<SwiftGateway>.Instance);
 
-    private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode fedNowStatus = HttpStatusCode.OK)
+    private static RtpTchGateway CreateRtpTchGateway() =>
+        new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "<xml/>"))
+            { BaseAddress = new Uri("http://localhost:8200") },
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        NullLogger<RtpTchGateway>.Instance);
+
+    private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode mqStatus = HttpStatusCode.OK)
     {
+        var rtpTchGateway = CreateRtpTchGateway();
         var internalPayment = new InternalPaymentService(db);
         var achPayment = new AchPaymentService(db, CreateAchGateway(), CreatePaymentConfig());
-        var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(), CreatePaymentConfig());
-        var fedNowPayment = new FedNowPaymentService(db, CreateFedNowGateway(fedNowStatus), CreatePaymentConfig());
+        var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
+        var fedNowPayment = new FedNowPaymentService(db, CreateMqGateway(mqStatus), new Pacs008Builder(), CreatePaymentConfig());
         var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(), CreatePaymentConfig());
-        var transferService = new TransferService(db);
+        var transferService = new TransferService(db, CreateMqGateway(mqStatus), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
         var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
@@ -85,7 +100,7 @@ public class CreateFedNowTransferTests
         return controller;
     }
 
-    private async Task<(AppDbContext db, Guid userId, Guid fromAccountId, string toAccountNumber)> Setup()
+    private async Task<(AppDbContext db, Guid userId, Guid fromAccountId)> Setup()
     {
         var db = CreateDb();
         var authService = new AuthService(db, CreateConfig());
@@ -110,84 +125,87 @@ public class CreateFedNowTransferTests
             }
         };
         await accountController.Create(new CreateAccountRequest { Type = "checking" });
-        await accountController.Create(new CreateAccountRequest { Type = "savings" });
         var accounts = await db.Accounts.ToListAsync();
         accounts[0].Balance = 1000m;
         await db.SaveChangesAsync();
-        return (db, user.Id, accounts[0].Id, accounts[1].AccountNumber);
+        return (db, user.Id, accounts[0].Id);
     }
 
     [Fact]
     public async Task CreateFedNow_ValidRequest_Returns201()
     {
-        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
+        var (db, userId, fromAccountId) = await Setup();
         var controller = CreateController(db, userId);
         var result = await controller.CreateFedNow(new CreateFedNowTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountNumber = toAccountNumber,
-            Amount = 100m
+            ToAccountNumber = "999888777666",
+            ToRoutingNumber = "010101012",
+            Amount = 100m,
+            RecipientName = "Miku"
         });
         var created = Assert.IsType<ObjectResult>(result);
         Assert.Equal(201, created.StatusCode);
     }
 
     [Fact]
-    public async Task CreateFedNow_BalanceUpdatedImmediately()
+    public async Task CreateFedNow_StatusPending_NotCompleted()
     {
-        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
+        var (db, userId, fromAccountId) = await Setup();
         var controller = CreateController(db, userId);
         await controller.CreateFedNow(new CreateFedNowTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountNumber = toAccountNumber,
-            Amount = 100m
-        });
-        var fromAccount = await db.Accounts.FindAsync(fromAccountId);
-        var toAccount = await db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == toAccountNumber);
-        Assert.Equal(900m, fromAccount!.Balance);
-        Assert.Equal(100m, toAccount!.Balance);
-        Assert.Equal(0m, fromAccount.ReservedBalance);
-    }
-
-    [Fact]
-    public async Task CreateFedNow_StatusCompleted()
-    {
-        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
-        var controller = CreateController(db, userId);
-        await controller.CreateFedNow(new CreateFedNowTransferRequest
-        {
-            FromAccountId = fromAccountId,
-            ToAccountNumber = toAccountNumber,
+            ToAccountNumber = "999888777666",
+            ToRoutingNumber = "010101012",
             Amount = 100m
         });
         var transfer = await db.Transfers.FirstAsync();
-        Assert.Equal(TransferStatus.Completed, transfer.Status);
+        Assert.Equal(TransferStatus.Pending, transfer.Status);
     }
 
     [Fact]
-    public async Task CreateFedNow_TwoTransactionsCreated()
+    public async Task CreateFedNow_BalanceReservedNotDeducted()
     {
-        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
+        var (db, userId, fromAccountId) = await Setup();
         var controller = CreateController(db, userId);
         await controller.CreateFedNow(new CreateFedNowTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountNumber = toAccountNumber,
+            ToAccountNumber = "999888777666",
+            ToRoutingNumber = "010101012",
             Amount = 100m
         });
-        Assert.Equal(2, await db.Transactions.CountAsync());
+        var fromAccount = await db.Accounts.FindAsync(fromAccountId);
+        Assert.Equal(1000m, fromAccount!.Balance);
+        Assert.Equal(100m, fromAccount.ReservedBalance);
+    }
+
+    [Fact]
+    public async Task CreateFedNow_NoTransactionsCreatedYet()
+    {
+        var (db, userId, fromAccountId) = await Setup();
+        var controller = CreateController(db, userId);
+        await controller.CreateFedNow(new CreateFedNowTransferRequest
+        {
+            FromAccountId = fromAccountId,
+            ToAccountNumber = "999888777666",
+            ToRoutingNumber = "010101012",
+            Amount = 100m
+        });
+        Assert.Equal(0, await db.Transactions.CountAsync());
     }
 
     [Fact]
     public async Task CreateFedNow_InsufficientFunds_Throws()
     {
-        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
+        var (db, userId, fromAccountId) = await Setup();
         var controller = CreateController(db, userId);
         await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateFedNow(new CreateFedNowTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountNumber = toAccountNumber,
+            ToAccountNumber = "999888777666",
+            ToRoutingNumber = "010101012",
             Amount = 9999m
         }));
     }
@@ -195,16 +213,49 @@ public class CreateFedNowTransferTests
     [Fact]
     public async Task CreateFedNow_GatewayFailure_ThrowsAndReleasesReservation()
     {
-        var (db, userId, fromAccountId, toAccountNumber) = await Setup();
+        var (db, userId, fromAccountId) = await Setup();
         var controller = CreateController(db, userId, HttpStatusCode.BadRequest);
         await Assert.ThrowsAsync<ArgumentException>(() => controller.CreateFedNow(new CreateFedNowTransferRequest
         {
             FromAccountId = fromAccountId,
-            ToAccountNumber = toAccountNumber,
+            ToAccountNumber = "999888777666",
+            ToRoutingNumber = "010101012",
             Amount = 100m
         }));
         var account = await db.Accounts.FindAsync(fromAccountId);
         Assert.Equal(0m, account!.ReservedBalance);
     }
-}
 
+    [Fact]
+    public async Task CreateFedNow_ExternalReferenceIdSetToMsgId()
+    {
+        var (db, userId, fromAccountId) = await Setup();
+        var controller = CreateController(db, userId);
+        await controller.CreateFedNow(new CreateFedNowTransferRequest
+        {
+            FromAccountId = fromAccountId,
+            ToAccountNumber = "999888777666",
+            ToRoutingNumber = "010101012",
+            Amount = 100m
+        });
+        var transfer = await db.Transfers.FirstAsync();
+        Assert.NotNull(transfer.ExternalReferenceId);
+        Assert.StartsWith("MSG-", transfer.ExternalReferenceId);
+    }
+
+    [Fact]
+    public async Task CreateFedNow_ToAccountIdIsNull_ExternalTransfer()
+    {
+        var (db, userId, fromAccountId) = await Setup();
+        var controller = CreateController(db, userId);
+        await controller.CreateFedNow(new CreateFedNowTransferRequest
+        {
+            FromAccountId = fromAccountId,
+            ToAccountNumber = "999888777666",
+            ToRoutingNumber = "010101012",
+            Amount = 100m
+        });
+        var transfer = await db.Transfers.FirstAsync();
+        Assert.Null(transfer.ToAccountId);
+    }
+}

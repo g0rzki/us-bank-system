@@ -1,5 +1,10 @@
 using System.Data;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using UsBankSystem.Api.Configuration;
+using UsBankSystem.Api.Integrations.FedNow;
+using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services.Payments;
 using UsBankSystem.Core.Domain.Transactions;
@@ -10,13 +15,18 @@ using Transfer = UsBankSystem.Core.Entities.Transfer;
 
 namespace UsBankSystem.Api.Services;
 
-public class TransferService(AppDbContext db)
+public class TransferService(
+    AppDbContext db,
+    FedNowMqGateway mqGateway,
+    RtpTchGateway rtpTchGateway,
+    Pacs008Builder pacs008Builder,
+    IOptions<PaymentSessionConfig> paymentConfig)
 {
     public async Task<List<TransferResponse>> GetAllAsync(Guid userId)
     {
         return await db.Transfers
             .Include(t => t.FromAccount)
-            .Where(t => t.FromAccount.UserId == userId || db.Accounts.Any(a => a.Id == t.ToAccountId && a.UserId == userId))
+            .Where(t => t.FromAccount!.UserId == userId || db.Accounts.Any(a => a.Id == t.ToAccountId && a.UserId == userId))
             .OrderByDescending(t => t.CreatedAt)
             .Select(t => new TransferResponse
             {
@@ -43,7 +53,7 @@ public class TransferService(AppDbContext db)
         var transfer = await db.Transfers
             .Include(t => t.FromAccount)
             .FirstOrDefaultAsync(t => t.Id == transferId
-                && (t.FromAccount.UserId == userId
+                && (t.FromAccount!.UserId == userId
                     || db.Accounts.Any(a => a.Id == t.ToAccountId && a.UserId == userId)
                     || db.JuniorAccounts.Any(j => j.AccountId == t.FromAccountId && j.ParentUserId == userId)))
             ?? throw new KeyNotFoundException("Transfer not found");
@@ -70,7 +80,7 @@ public class TransferService(AppDbContext db)
             {
                 Id = t.Id,
                 FromAccountId = t.FromAccountId,
-                FromAccountNumber = t.FromAccount.AccountNumber,
+                FromAccountNumber = t.FromAccount != null ? t.FromAccount.AccountNumber : null,
                 ToAccountId = t.ToAccountId,
                 Amount = t.Amount,
                 Currency = t.Currency,
@@ -96,14 +106,19 @@ public class TransferService(AppDbContext db)
         if (!isParent)
             throw new UnauthorizedAccessException("Access denied");
 
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transferId} has no source account");
+
         var availableBalance = transfer.FromAccount.Balance - transfer.FromAccount.ReservedBalance;
         if (availableBalance < transfer.Amount)
             throw new InvalidOperationException("Insufficient funds");
 
-        // ACH external transfers (ToAccountId = null) cannot be approved here: the gateway
-        // metadata (routing number, recipient name, etc.) is not stored on the Transfer and
-        // approval requires submitting a NACHA file. Reject and require the parent to resubmit
-        // directly via the ACH endpoint.
+        if (transfer.Channel == TransferChannel.FedNow)
+            return await ApproveFedNowAsync(transfer, userId);
+
+        if (transfer.Channel == TransferChannel.Rtp && transfer.ToRoutingNumber is not null)
+            return await ApproveRtpExternalAsync(transfer, userId);
+
         if (transfer.Channel == TransferChannel.Ach && transfer.ToAccountId is null)
             throw new InvalidOperationException(
                 "ACH external transfers cannot be approved through this flow. " +
@@ -119,21 +134,24 @@ public class TransferService(AppDbContext db)
         transfer.ApprovedAt = DateTime.UtcNow;
         transfer.CompletedAt = DateTime.UtcNow;
 
-        db.Transactions.Add(new Transaction
+        var transactions = new List<Transaction>
         {
-            Id = Guid.NewGuid(),
-            AccountId = transfer.FromAccountId,
-            Amount = transfer.Amount,
-            Type = TransactionType.Debit,
-            Status = TransactionStatus.Completed,
-            Description = transfer.Description ?? "Junior transfer",
-            ReferenceId = transfer.Id.ToString(),
-            CreatedAt = DateTime.UtcNow
-        });
+            new()
+            {
+                Id = Guid.NewGuid(),
+                AccountId = transfer.FromAccountId!.Value,
+                Amount = transfer.Amount,
+                Type = TransactionType.Debit,
+                Status = TransactionStatus.Completed,
+                Description = transfer.Description ?? "Junior transfer",
+                ReferenceId = transfer.Id.ToString(),
+                CreatedAt = DateTime.UtcNow
+            }
+        };
 
         if (transfer.ToAccountId.HasValue)
         {
-            db.Transactions.Add(new Transaction
+            transactions.Add(new Transaction
             {
                 Id = Guid.NewGuid(),
                 AccountId = transfer.ToAccountId.Value,
@@ -145,6 +163,8 @@ public class TransferService(AppDbContext db)
                 CreatedAt = DateTime.UtcNow
             });
         }
+
+        db.Transactions.AddRange(transactions);
 
         await db.SaveChangesAsync();
         return PaymentServiceBase.MapToResponse(transfer);
@@ -163,6 +183,9 @@ public class TransferService(AppDbContext db)
         var isParent = await db.JuniorAccounts.AnyAsync(j => j.AccountId == transfer.FromAccountId && j.ParentUserId == userId);
         if (!isParent)
             throw new UnauthorizedAccessException("Access denied");
+
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transferId} has no source account");
 
         transfer.FromAccount.ReservedBalance -= transfer.Amount;
         transfer.Status = TransferStatus.Rejected;
@@ -224,6 +247,9 @@ public class TransferService(AppDbContext db)
         if (transfer.Status != TransferStatus.Pending)
             throw new ArgumentException("Transfer is not in pending state");
 
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transferId} has no source account");
+
         if (status == TransferStatus.Completed)
         {
             transfer.FromAccount.Balance -= transfer.Amount;
@@ -247,7 +273,7 @@ public class TransferService(AppDbContext db)
                 db.Transactions.Add(new Transaction
                 {
                     Id = Guid.NewGuid(),
-                    AccountId = transfer.FromAccountId,
+                    AccountId = transfer.FromAccountId!.Value,
                     Amount = transfer.Amount,
                     Type = TransactionType.Debit,
                     Status = TransactionStatus.Completed,
@@ -282,11 +308,115 @@ public class TransferService(AppDbContext db)
             if (failedDebit is not null)
                 failedDebit.Status = TransactionStatus.Failed;
         }
+        else if (status == TransferStatus.Rejected)
+        {
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            transfer.Status = TransferStatus.Rejected;
+            transfer.RejectedAt = DateTime.UtcNow;
+        }
         else
         {
             throw new ArgumentException($"Invalid status '{status}'");
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    private async Task<TransferResponse> ApproveRtpExternalAsync(Transfer transfer, Guid userId)
+    {
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transfer.Id} has no source account");
+
+        var config = paymentConfig.Value.Rtp;
+
+        transfer.ApprovedBy = userId;
+        transfer.ApprovedAt = DateTime.UtcNow;
+
+        var accountOwner = await db.Users.FirstOrDefaultAsync(u => u.Id == transfer.FromAccount.UserId);
+        var senderName = accountOwner is not null ? $"{accountOwner.FirstName} {accountOwner.LastName}" : "Unknown";
+
+        var msgId = $"MSG-{DateTime.UtcNow:yyyyMMdd}-{transfer.Id:N}";
+        var endToEndId = $"E2E-{transfer.Id:N}";
+
+        var pacs008Xml = pacs008Builder.Build(new Pacs008Data(
+            MsgId: msgId,
+            EndToEndId: endToEndId,
+            Amount: transfer.Amount,
+            Currency: transfer.Currency,
+            DebtorBankName: config.BankCode,
+            DebtorBankRtn: config.BankRtn,
+            DebtorName: senderName,
+            DebtorAccountNumber: transfer.FromAccount.AccountNumber,
+            CreditorBankName: transfer.ToBankCode ?? transfer.ToRoutingNumber ?? "",
+            CreditorBankRtn: transfer.ToRoutingNumber ?? "",
+            CreditorName: transfer.RecipientName ?? "Unknown",
+            CreditorAccountNumber: transfer.ToAccountNumber ?? "",
+            Description: transfer.Description
+        ));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(config.TimeoutSeconds));
+        var result = await rtpTchGateway.SendPacs008Async(pacs008Xml, cts.Token);
+
+        if (!result.Success)
+        {
+            transfer.Status = TransferStatus.Failed;
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            await db.SaveChangesAsync();
+            return PaymentServiceBase.MapToResponse(transfer);
+        }
+
+        transfer.Status = TransferStatus.Pending;
+        transfer.ExternalReferenceId = endToEndId;
+        await db.SaveChangesAsync();
+        return PaymentServiceBase.MapToResponse(transfer);
+    }
+
+    private async Task<TransferResponse> ApproveFedNowAsync(Transfer transfer, Guid userId)
+    {
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transfer.Id} has no source account");
+
+        var config = paymentConfig.Value.FedNow;
+
+        transfer.ApprovedBy = userId;
+        transfer.ApprovedAt = DateTime.UtcNow;
+
+        var accountOwner = await db.Users.FirstOrDefaultAsync(u => u.Id == transfer.FromAccount.UserId);
+        var senderName = accountOwner is not null ? $"{accountOwner.FirstName} {accountOwner.LastName}" : "Unknown";
+
+        var msgId = $"MSG-{DateTime.UtcNow:yyyyMMdd}-{transfer.Id:N}";
+        var endToEndId = $"E2E-{transfer.Id:N}";
+
+        var pacs008Xml = pacs008Builder.Build(new Pacs008Data(
+            MsgId: msgId,
+            EndToEndId: endToEndId,
+            Amount: transfer.Amount,
+            Currency: transfer.Currency,
+            DebtorBankName: config.BankLegalName,
+            DebtorBankRtn: config.BankRtn,
+            DebtorName: senderName,
+            DebtorAccountNumber: transfer.FromAccount.AccountNumber,
+            CreditorBankName: "Unknown Bank",
+            CreditorBankRtn: transfer.ToRoutingNumber ?? "",
+            CreditorName: transfer.RecipientName ?? "Unknown",
+            CreditorAccountNumber: transfer.ToAccountNumber ?? "",
+            Description: transfer.Description
+        ));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(config.TimeoutSeconds));
+        var (success, error) = await mqGateway.SendXmlAsync(Encoding.UTF8.GetBytes(pacs008Xml), cts.Token);
+
+        if (!success)
+        {
+            transfer.Status = TransferStatus.Failed;
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            await db.SaveChangesAsync();
+            return PaymentServiceBase.MapToResponse(transfer);
+        }
+
+        transfer.Status = TransferStatus.Pending;
+        transfer.ExternalReferenceId = msgId;
+        await db.SaveChangesAsync();
+        return PaymentServiceBase.MapToResponse(transfer);
     }
 }
