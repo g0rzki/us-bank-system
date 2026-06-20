@@ -103,7 +103,74 @@ Panel administracyjny FedSystems dostępny pod `:3310`.
 - Settlement T+{czas} nie jest implementowany — transfer przechodzi w Completed po pacs.002 ACCP, bez mechanizmu opóźnionego rozliczenia.
 
 ### SWIFT
-> 📝 TODO (US-57) — opis sieci korespondentów, IBAN, BIC, SWIFT gpi
+
+SWIFT (Society for Worldwide Interbank Financial Telecommunication) to globalna sieć pośrednicząca w przesyłaniu komunikatów finansowych między bankami. Sam SWIFT nie przenosi środków — jest wyłącznie siecią komunikatów. Faktyczne rozliczenie odbywa się przez **banki korespondentów**: łańcuch banków pośredniczących, które mają wzajemne rachunki (tzw. nostro/vostro) i faktycznie przesuwają środki między sobą, aż dotrą do banku docelowego.
+
+Każdy bank jest identyfikowany przez **BIC** (Bank Identifier Code, np. `USBKUS01XXX`), a każdy przelew przez **UETR** (Unique End-to-end Transaction Reference) — globalnie unikalny UUID śledzący płatność przez całą sieć. Rachunek odbiorcy przekazywany jest w formacie **IBAN**.
+
+**Koszty (charge bearer):**
+| Kod | Nazwa | Opis |
+|---|---|---|
+| `SHA` | Shared | Nadawca płaci opłaty swojego banku, odbiorca — banków pośredniczących i docelowego |
+| `OUR` | Our (Debt) | Nadawca pokrywa wszystkie opłaty — odbiorca dostaje pełną kwotę |
+| `BEN` | Beneficiary (Cred) | Odbiorca pokrywa wszystkie opłaty — kwota zostaje pomniejszona |
+
+**Mechanizm w tym projekcie:**
+
+Komunikacja odbywa się przez zewnętrzny **SWIFT Middleware** (innej grupy). Bank uwierzytelnia się do niego przez **OAuth2 client\_credentials** i wysyła/odbiera komunikaty **ISO 20022 pacs.008** (XML).
+
+- **Przelew wychodzący:** `POST /transfers/swift` → walidacja → rezerwacja salda → pacs.008 wysłany do middleware (`POST /swift/message`) → middleware zwraca UETR → transfer w statusie `Pending` → middleware wywołuje `POST /transfers/swift/receive` po rozliczeniu lub odrzuceniu
+- **Przelew przychodzący:** middleware wywołuje `POST /transfers/swift/receive` z pacs.008 XML → bank parsuje XML, wyciąga kwotę i walutę (`IntrBkSttlmAmt[@Ccy]`), numer konta odbiorcy (`CdtrAcct/Id/Othr/Id`), przelicza walutę na USD przez tabelę `ExchangeRates` i księguje kredyt na koncie
+
+**Waluty:**
+- **Wychodzące:** wyłącznie **USD**
+- **Przychodzące:** dowolna z 20 walut ISO 4217 (EUR, GBP, CHF, JPY, PLN, ...) — automatycznie konwertowane na USD według statycznej tabeli kursów (`ExchangeRates` w DB)
+
+**Limity:**
+- Dzienny limit wychodzący: **$50 000 / konto** (konfigurowalny przez `Swift:DailyLimitPerAccount`)
+- Przelew juniora przez SWIFT trafia do `pending_approval` i wymaga zatwierdzenia przez rodzica
+
+**Konfiguracja:**
+
+| Zmienna | Opis | Przykład |
+|---|---|---|
+| `INTEGRATIONS_SWIFT_URL` | URL SWIFT Middleware | `http://localhost:6004` |
+| `Swift__ClientId` | ID klienta OAuth2 | `bank-usbkus01` |
+| `Swift__ClientSecret` | Sekret klienta OAuth2 | `secret-usbkus01` |
+| `Swift__Bic` | BIC naszego banku | `USBKUS01XXX` |
+| `Swift__WebhookSecret` | Sekret nagłówka `X-SWIFT-Webhook-Secret` (opcjonalny) | `changeme` |
+
+**Obsługiwane przepływy:**
+
+```mermaid
+flowchart TD
+    U([Użytkownik]) -->|POST /transfers/swift| SVC[SwiftPaymentService]
+    SVC -->|1. Walidacja IBAN + BIC + USD| VAL[SwiftRequestValidator]
+    VAL --> SVC
+    SVC -->|2. Rezerwacja salda + Transfer Pending| DB[(PostgreSQL)]
+    SVC -->|3. Buduje pacs.008 XML + OAuth2 token| GW[SwiftGateway]
+    GW -->|4. POST /swift/message| MW[SWIFT Middleware]
+    MW -->|5. UETR| GW
+    GW --> SVC
+    MW -->|6. POST /transfers/swift/receive pacs.008| RCV[SwiftReceive endpoint]
+    RCV -->|7. Completed / Failed| DB
+```
+
+```mermaid
+flowchart TD
+    MW[SWIFT Middleware] -->|POST /transfers/swift/receive pacs.008 XML| RCV[TransfersController]
+    RCV -->|1. Parse pacs.008| PRS[SwiftGateway.ParseIncoming]
+    PRS -->|UETR + kwota + waluta + CdtrAcct| RCV
+    RCV -->|2. Szukaj UETR w DB| DB[(PostgreSQL)]
+    DB -->|transfer nie istnieje = prawdziwy incoming| RCV
+    RCV -->|3. Lookup ExchangeRates| DB
+    RCV -->|4. Balance += kwota × kurs USD| DB
+    RCV -->|5. Transfer + Transaction Completed| DB
+```
+
+**Znane ograniczenia:**
+- Brak callbacku potwierdzającego faktyczne dotarcie środków — po przyjęciu przez middleware transfer przechodzi w `Pending` do momentu wywołania `/receive`. W środowisku mock webhook przychodzi automatycznie po ~kilku sekundach (`Swift:TimeoutSeconds` w `payment-config.json`).
+- Kursy walut są statyczne (tabela `ExchangeRates` seedowana przy starcie) — brak integracji z zewnętrznym źródłem kursów.
 
 ### Karty płatnicze
 

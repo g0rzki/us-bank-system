@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
@@ -26,16 +27,25 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
             ?? throw new InvalidOperationException($"User {fromAccount.UserId} not found for account {fromAccount.Id}");
         var fromAccountName = $"{fromUser.FirstName} {fromUser.LastName}".Trim();
 
+        if (await IsJuniorInitiatedAsync(userId, fromAccount.Id))
+            return await CreatePendingApprovalAsync(fromAccount, null, request.Amount, request.Currency, TransferChannel.Swift, request.Description);
+
+        // Serializable ensures the daily-limit check and the ReservedBalance update are atomic.
+        await using var tx = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+
+        // Reload inside the transaction to get values locked for this transaction.
+        await Db.Entry(fromAccount).ReloadAsync();
+
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
             throw new ArgumentException("Insufficient funds");
 
-        if (await IsJuniorInitiatedAsync(userId, fromAccount.Id))
-            return await CreatePendingApprovalAsync(fromAccount, null, request.Amount, request.Currency, TransferChannel.Swift, request.Description);
-
         var todaySwiftTotal = await GetTodayTransferTotalByChannelAsync(fromAccount.Id, TransferChannel.Swift);
         SwiftRequestValidator.ValidateDailyLimit(todaySwiftTotal, request.Amount, paymentConfig.Value.Swift.DailyLimitPerAccount);
 
+        // Pre-generate UETR and persist it before calling the gateway so that a successful
+        // gateway call that is followed by a failed SaveChanges cannot lose the UETR.
+        var uetr = Guid.NewGuid().ToString().ToLowerInvariant();
         fromAccount.ReservedBalance += request.Amount;
 
         var transfer = new Transfer
@@ -48,6 +58,7 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
             Currency = request.Currency.ToUpperInvariant(),
             Channel = TransferChannel.Swift,
             Status = TransferStatus.Pending,
+            ExternalReferenceId = uetr,
             Description = request.Description,
             RequiresApproval = false,
             CreatedAt = DateTime.UtcNow
@@ -56,6 +67,7 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
         Db.Transfers.Add(transfer);
         Db.Transactions.Add(CreateTransaction(fromAccount.Id, request.Amount, TransactionType.Debit, TransactionStatus.Pending, request.Description ?? "SWIFT transfer", transfer.Id));
         await Db.SaveChangesAsync();
+        await tx.CommitAsync();
 
         var gatewayResult = await swiftGateway.SendAsync(new(
             TransferId: transfer.Id,
@@ -64,6 +76,7 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
             Description: transfer.Description,
             Metadata: new Dictionary<string, string>
             {
+                ["uetr"] = uetr,
                 ["iban"] = request.Iban,
                 ["bic"] = request.Bic,
                 ["beneficiaryName"] = request.BeneficiaryName,
@@ -84,8 +97,6 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
             throw new ArgumentException(gatewayResult.Error ?? "SWIFT gateway error");
         }
 
-        transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
-        await Db.SaveChangesAsync();
         return MapToResponse(transfer);
     }
 }

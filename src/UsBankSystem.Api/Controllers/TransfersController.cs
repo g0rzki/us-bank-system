@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using UsBankSystem.Api.Integrations;
@@ -19,7 +21,8 @@ public class TransfersController(
     RtpPaymentService rtpPayment,
     FedNowPaymentService fedNowPayment,
     SwiftPaymentService swiftPayment,
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    ILogger<TransfersController> logger) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(typeof(List<TransferResponse>), StatusCodes.Status200OK)]
@@ -132,8 +135,17 @@ public class TransfersController(
     {
         var webhookSecret = configuration["Swift:WebhookSecret"];
         var providedSecret = Request.Headers["X-SWIFT-Webhook-Secret"].FirstOrDefault();
-        if (!string.IsNullOrEmpty(webhookSecret) && providedSecret != webhookSecret)
+        if (string.IsNullOrEmpty(webhookSecret))
+        {
+            logger.LogWarning("Swift:WebhookSecret is not configured — /transfers/swift/receive is unauthenticated");
+        }
+        else if (string.IsNullOrEmpty(providedSecret) ||
+                 !CryptographicOperations.FixedTimeEquals(
+                     Encoding.UTF8.GetBytes(providedSecret),
+                     Encoding.UTF8.GetBytes(webhookSecret)))
+        {
             return Unauthorized(new { message = "Invalid SWIFT webhook secret" });
+        }
 
         string xml;
         using (var reader = new System.IO.StreamReader(Request.Body))

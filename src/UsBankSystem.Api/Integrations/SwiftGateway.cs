@@ -21,6 +21,7 @@ public class SwiftGateway(
     : IPaymentGateway
 {
     private const string TokenCacheKey = "swift_bearer_token";
+    private static readonly SemaphoreSlim TokenSemaphore = new(1, 1);
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     public string Channel => TransferChannel.Swift;
@@ -65,34 +66,47 @@ public class SwiftGateway(
         if (cache.TryGetValue(TokenCacheKey, out string? cached))
             return cached!;
 
-        var opts = swiftOptions.Value;
-        var form = new FormUrlEncodedContent(
-        [
-            new KeyValuePair<string, string>("client_id", opts.ClientId),
-            new KeyValuePair<string, string>("client_secret", opts.ClientSecret),
-            new KeyValuePair<string, string>("grant_type", "client_credentials")
-        ]);
+        await TokenSemaphore.WaitAsync(ct);
+        try
+        {
+            if (cache.TryGetValue(TokenCacheKey, out cached))
+                return cached!;
 
-        var response = await httpClient.PostAsync("/auth/token", form, ct);
-        var body = await response.Content.ReadAsStringAsync(ct);
-        if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"SWIFT /auth/token failed {(int)response.StatusCode}: {body}");
+            var opts = swiftOptions.Value;
+            var form = new FormUrlEncodedContent(
+            [
+                new KeyValuePair<string, string>("client_id", opts.ClientId),
+                new KeyValuePair<string, string>("client_secret", opts.ClientSecret),
+                new KeyValuePair<string, string>("grant_type", "client_credentials")
+            ]);
 
-        var tokenData = JsonSerializer.Deserialize<TokenResponse>(body, JsonOpts)
-            ?? throw new InvalidOperationException("Empty SWIFT token response");
-        var token = tokenData.AccessToken
-            ?? throw new InvalidOperationException("SWIFT token response missing access_token");
+            var response = await httpClient.PostAsync("/auth/token", form, ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"SWIFT /auth/token failed {(int)response.StatusCode}: {body}");
 
-        // Cache for 55 min — token TTL is 1 h
-        cache.Set(TokenCacheKey, token, TimeSpan.FromMinutes(55));
-        logger.LogDebug("SWIFT OAuth2 token refreshed");
-        return token;
+            var tokenData = JsonSerializer.Deserialize<TokenResponse>(body, JsonOpts)
+                ?? throw new InvalidOperationException("Empty SWIFT token response");
+            var token = tokenData.AccessToken
+                ?? throw new InvalidOperationException("SWIFT token response missing access_token");
+
+            cache.Set(TokenCacheKey, token, TimeSpan.FromMinutes(55));
+            logger.LogDebug("SWIFT OAuth2 token refreshed");
+            return token;
+        }
+        finally
+        {
+            TokenSemaphore.Release();
+        }
     }
 
     private string BuildPacs008Xml(PaymentGatewayRequest request)
     {
         var m = request.Metadata ?? [];
-        var uetr = Guid.NewGuid().ToString().ToLowerInvariant();
+        m.TryGetValue("uetr", out var uetrMeta);
+        var uetr = string.IsNullOrWhiteSpace(uetrMeta)
+            ? Guid.NewGuid().ToString().ToLowerInvariant()
+            : uetrMeta;
         var now = DateTime.UtcNow;
         var msgId = $"MSG-{request.TransferId:N}"[..24];
         var instrId = $"INST-{request.TransferId:N}"[..25];

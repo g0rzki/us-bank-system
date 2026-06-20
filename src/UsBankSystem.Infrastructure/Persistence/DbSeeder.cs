@@ -312,7 +312,7 @@ public static class DbSeeder
                 Currency = "USD",
                 Channel = "swift",
                 Status = TransferStatus.Pending,
-                ExternalReferenceId = "SWIFT-2024-000088",
+                ExternalReferenceId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 Description = "International invoice",
                 RequiresApproval = false,
                 CreatedAt = DateTime.UtcNow.AddHours(-1)

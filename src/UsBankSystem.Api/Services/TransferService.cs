@@ -21,7 +21,8 @@ public class TransferService(
     FedNowMqGateway mqGateway,
     RtpTchGateway rtpTchGateway,
     Pacs008Builder pacs008Builder,
-    IOptions<PaymentSessionConfig> paymentConfig)
+    IOptions<PaymentSessionConfig> paymentConfig,
+    ILogger<TransferService> logger)
 {
     public async Task<List<TransferResponse>> GetAllAsync(Guid userId)
     {
@@ -254,22 +255,36 @@ public class TransferService(
     private async Task ProcessIncomingSwiftAsync(string uetr, string xml, CancellationToken ct)
     {
         var parsed = SwiftGateway.ParseIncoming(xml);
-        if (parsed is null) return;
+        if (parsed is null)
+        {
+            logger.LogError("Incoming SWIFT UETR={Uetr}: failed to parse pacs.008 XML — transfer not credited", uetr);
+            return;
+        }
 
-        // Find the recipient account by account number or partial IBAN match.
         var creditorRef = parsed.CreditorAccount?.Trim();
-        if (string.IsNullOrWhiteSpace(creditorRef)) return;
+        if (string.IsNullOrWhiteSpace(creditorRef))
+        {
+            logger.LogError("Incoming SWIFT UETR={Uetr}: no creditor account in pacs.008 — transfer not credited", uetr);
+            return;
+        }
 
-        var account = await db.Accounts.FirstOrDefaultAsync(
-            a => a.AccountNumber == creditorRef || creditorRef.EndsWith(a.AccountNumber), ct);
-        if (account is null) return;
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == creditorRef, ct);
+        if (account is null)
+        {
+            logger.LogError("Incoming SWIFT UETR={Uetr}: no account found for creditor '{Creditor}' — transfer not credited", uetr, creditorRef);
+            return;
+        }
 
         // Convert incoming currency to USD.
         var amountUsd = parsed.Amount;
         if (!string.Equals(parsed.Currency, "USD", StringComparison.OrdinalIgnoreCase))
         {
             var rate = await db.ExchangeRates.FindAsync([parsed.Currency.ToUpperInvariant()], ct);
-            if (rate is null) return;
+            if (rate is null)
+            {
+                logger.LogError("Incoming SWIFT UETR={Uetr}: no exchange rate for currency '{Currency}' — transfer not credited", uetr, parsed.Currency);
+                return;
+            }
             amountUsd = Math.Round(parsed.Amount * rate.RateToUsd, 2);
         }
 

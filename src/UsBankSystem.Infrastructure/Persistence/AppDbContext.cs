@@ -71,6 +71,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(t => t.FromAccountId);
             e.HasIndex(t => t.Status);
+            e.HasIndex(t => t.ExternalReferenceId)
+                .IsUnique()
+                .HasFilter("\"ExternalReferenceId\" IS NOT NULL");
         });
         
         modelBuilder.Entity<Card>(e =>
