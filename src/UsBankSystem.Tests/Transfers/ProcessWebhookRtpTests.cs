@@ -41,7 +41,7 @@ public class ProcessWebhookRtpTests
                 { BaseAddress = new Uri("http://localhost:8200") },
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
             NullLogger<RtpTchGateway>.Instance);
-        return new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
+        return new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(), NullLogger<TransferService>.Instance);
     }
 
     private async Task<(AppDbContext db, Guid accountId, Guid transferId)> Setup()

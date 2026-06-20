@@ -72,7 +72,10 @@ public class TransfersController(
     {
         var expectedSecret = configuration["Webhook:Secret"];
         var providedSecret = Request.Headers["X-Webhook-Secret"].FirstOrDefault();
-        if (string.IsNullOrEmpty(expectedSecret) || providedSecret != expectedSecret)
+        if (string.IsNullOrEmpty(expectedSecret) || string.IsNullOrEmpty(providedSecret) ||
+            !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(providedSecret),
+                Encoding.UTF8.GetBytes(expectedSecret)))
             return Unauthorized(new { message = "Invalid webhook secret" });
 
         await transferService.ProcessWebhookAsync(id, request.Status, request.ReferenceId);

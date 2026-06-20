@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -82,9 +82,9 @@ public class CreateSwiftTransferTests
         var achPayment = new AchPaymentService(db, CreateAchGateway(), CreatePaymentConfig(swiftDailyLimit));
         var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
         var fedNowPayment = new FedNowPaymentService(db, CreateMqGateway(), new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
-        var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(swiftStatus), CreatePaymentConfig(swiftDailyLimit));
-        var transferService = new TransferService(db, CreateMqGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
-        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
+        var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(swiftStatus), CreatePaymentConfig(swiftDailyLimit), NullLogger<SwiftPaymentService>.Instance);
+        var transferService = new TransferService(db, CreateMqGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit), NullLogger<TransferService>.Instance);
+        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig(), NullLogger<TransfersController>.Instance);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext

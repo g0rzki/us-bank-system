@@ -15,7 +15,7 @@ using Transfer = UsBankSystem.Core.Entities.Transfer;
 
 namespace UsBankSystem.Api.Services.Payments;
 
-public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOptions<PaymentSessionConfig> paymentConfig) : PaymentServiceBase(db)
+public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOptions<PaymentSessionConfig> paymentConfig, ILogger<SwiftPaymentService> logger) : PaymentServiceBase(db)
 {
     public async Task<TransferResponse> CreateAsync(Guid userId, CreateSwiftTransferRequest request)
     {
@@ -95,6 +95,19 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
             fromAccount.ReservedBalance -= request.Amount;
             await Db.SaveChangesAsync();
             throw new ArgumentException(gatewayResult.Error ?? "SWIFT gateway error");
+        }
+
+        // Verify that the gateway echoed our pre-generated UETR. If the middleware reassigns it,
+        // the /receive callback will arrive with a different UETR and our lookup will fail.
+        if (!string.IsNullOrEmpty(gatewayResult.ExternalReferenceId) &&
+            !string.Equals(gatewayResult.ExternalReferenceId, uetr, StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(
+                "SWIFT gateway returned UETR {GatewayUetr} that differs from pre-generated {OurUetr}. " +
+                "Updating ExternalReferenceId to match gateway value to ensure callback lookup succeeds.",
+                gatewayResult.ExternalReferenceId, uetr);
+            transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
+            await Db.SaveChangesAsync();
         }
 
         return MapToResponse(transfer);

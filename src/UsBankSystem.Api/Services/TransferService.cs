@@ -254,6 +254,14 @@ public class TransferService(
 
     private async Task ProcessIncomingSwiftAsync(string uetr, string xml, CancellationToken ct)
     {
+        // Idempotency: the unique index would reject a duplicate, but checking first gives a
+        // cleaner log and avoids the exception on normal middleware retries.
+        if (await db.Transfers.AnyAsync(t => t.ExternalReferenceId == uetr, ct))
+        {
+            logger.LogInformation("Incoming SWIFT UETR={Uetr}: already processed, skipping duplicate delivery", uetr);
+            return;
+        }
+
         var parsed = SwiftGateway.ParseIncoming(xml);
         if (parsed is null)
         {

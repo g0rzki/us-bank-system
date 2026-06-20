@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -72,9 +72,9 @@ public class CreateInternalTransferTests
     	var achPayment = new AchPaymentService(db, achGateway, paymentConfig);
     	var rtpPayment = new RtpPaymentService(db, rtpGateway, rtpTchGateway, new Pacs008Builder(), paymentConfig);
     	var fedNowPayment = new FedNowPaymentService(db, mqGateway, new Pacs008Builder(), paymentConfig);
-    	var swiftPayment = new SwiftPaymentService(db, swiftGateway, paymentConfig);
-    	var transferService = new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), paymentConfig);
-    	var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
+    	var swiftPayment = new SwiftPaymentService(db, swiftGateway, paymentConfig, NullLogger<SwiftPaymentService>.Instance);
+    	var transferService = new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), paymentConfig, NullLogger<TransferService>.Instance);
+    	var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig(), NullLogger<TransfersController>.Instance);
     	controller.ControllerContext = new ControllerContext
     	{
         	HttpContext = new DefaultHttpContext

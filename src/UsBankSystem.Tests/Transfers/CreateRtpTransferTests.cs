@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Security.Claims;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
@@ -83,9 +83,9 @@ public class CreateRtpTransferTests
         var achPayment = new AchPaymentService(db, CreateAchGateway(), CreatePaymentConfig());
         var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(rtpStatus), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
         var fedNowPayment = new FedNowPaymentService(db, mqGateway, new Pacs008Builder(), CreatePaymentConfig());
-        var swiftPayment = new SwiftPaymentService(db, swiftGateway, CreatePaymentConfig());
-        var transferService = new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
-        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
+        var swiftPayment = new SwiftPaymentService(db, swiftGateway, CreatePaymentConfig(), NullLogger<SwiftPaymentService>.Instance);
+        var transferService = new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(), NullLogger<TransferService>.Instance);
+        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig(), NullLogger<TransfersController>.Instance);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
