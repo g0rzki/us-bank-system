@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
@@ -56,9 +57,14 @@ public class CreateSwiftTransferTests
             { BaseAddress = new Uri("http://localhost:6003") },
             NullLogger<FedNowGateway>.Instance);
 
-    private static SwiftGateway CreateSwiftGateway(HttpStatusCode statusCode) =>
-        new(new HttpClient(new MockHttpMessageHandler(statusCode, """{"referenceId":"SWIFT-REF-001"}"""))
-            { BaseAddress = new Uri("http://localhost:6004") },
+    private static SwiftGateway CreateSwiftGateway(HttpStatusCode swiftStatusCode) =>
+        new(new HttpClient(new RoutingMockHttpMessageHandler(
+        [
+            ("/auth/token",  HttpStatusCode.OK,       """{"access_token":"test-token","token_type":"Bearer","expires_in":3600}"""),
+            ("/swift/message", swiftStatusCode,        """{"uetr":"SWIFT-REF-001","status":"accepted","route":[]}""")
+        ])) { BaseAddress = new Uri("http://localhost:6004") },
+            new MemoryCache(new MemoryCacheOptions()),
+            Options.Create(new SwiftOptions()),
             NullLogger<SwiftGateway>.Instance);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode swiftStatus = HttpStatusCode.OK, decimal swiftDailyLimit = 50_000m)

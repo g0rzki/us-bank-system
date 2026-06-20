@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
@@ -59,6 +60,8 @@ public class ApproveRejectTransferTests
         var swiftGateway = new SwiftGateway(
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6004") },
+            new MemoryCache(new MemoryCacheOptions()),
+            Options.Create(new SwiftOptions()),
             NullLogger<SwiftGateway>.Instance);
 
         var internalPayment = new InternalPaymentService(db);

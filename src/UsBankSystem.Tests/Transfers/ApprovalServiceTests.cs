@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
@@ -49,7 +50,7 @@ public class ApprovalServiceTests
         var achGateway = AchTestHelpers.CreateGateway();
         var rtpGateway = new RtpGateway(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}")) { BaseAddress = new Uri("http://localhost:6002") }, NullLogger<RtpGateway>.Instance);
         var fedNowGateway = new FedNowGateway(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}")) { BaseAddress = new Uri("http://localhost:6003") }, NullLogger<FedNowGateway>.Instance);
-        var swiftGateway = new SwiftGateway(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}")) { BaseAddress = new Uri("http://localhost:6004") }, NullLogger<SwiftGateway>.Instance);
+        var swiftGateway = new SwiftGateway(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}")) { BaseAddress = new Uri("http://localhost:6004") }, new MemoryCache(new MemoryCacheOptions()), Options.Create(new SwiftOptions()), NullLogger<SwiftGateway>.Instance);
         var internalPayment = new InternalPaymentService(db);
         var achPayment = new AchPaymentService(db, achGateway, CreatePaymentConfig());
         var rtpPayment = new RtpPaymentService(db, rtpGateway, CreatePaymentConfig());

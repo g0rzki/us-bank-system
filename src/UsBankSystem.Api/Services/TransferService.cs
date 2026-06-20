@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services.Payments;
@@ -169,6 +170,47 @@ public class TransferService(AppDbContext db)
 
         await db.SaveChangesAsync();
         return PaymentServiceBase.MapToResponse(transfer);
+    }
+
+    public async Task ProcessSwiftReceiveAsync(string uetr, bool isReturn, CancellationToken ct = default)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+
+        var transfer = await db.Transfers
+            .Include(t => t.FromAccount)
+            .FirstOrDefaultAsync(t => t.ExternalReferenceId == uetr, ct);
+
+        if (transfer is null || transfer.Status != TransferStatus.Pending)
+        {
+            await tx.RollbackAsync(ct);
+            return;
+        }
+
+        if (isReturn)
+        {
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            transfer.Status = TransferStatus.Failed;
+
+            var debit = await db.Transactions.FirstOrDefaultAsync(
+                t => t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit, ct);
+            if (debit is not null)
+                debit.Status = TransactionStatus.Failed;
+        }
+        else
+        {
+            transfer.FromAccount.Balance -= transfer.Amount;
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            transfer.Status = TransferStatus.Completed;
+            transfer.CompletedAt = DateTime.UtcNow;
+
+            var debit = await db.Transactions.FirstOrDefaultAsync(
+                t => t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit, ct);
+            if (debit is not null)
+                debit.Status = TransactionStatus.Completed;
+        }
+
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     public async Task ProcessWebhookAsync(Guid transferId, string status, string? referenceId, CancellationToken ct = default)

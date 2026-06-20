@@ -35,10 +35,14 @@ services:
       - Integrations__AchUrl=http://mock-gateways:6001
       - Integrations__RtpUrl=http://mock-gateways:6002
       - Integrations__FedNowUrl=http://mock-gateways:6003
-      - Integrations__SwiftUrl=http://mock-gateways:6004
+      - Integrations__SwiftUrl=${INTEGRATIONS_SWIFT_URL:-http://host.docker.internal:3000}
+      - Swift__ClientId=${Swift__ClientId:-test-client}
+      - Swift__ClientSecret=${Swift__ClientSecret:-test-secret}
+      - Swift__Bic=${Swift__Bic:-USBKUS01XXX}
+      - Swift__WebhookSecret=${Swift__WebhookSecret:-}
       - Integrations__CardsUrl=${INTEGRATIONS_CARDS_URL}
       - Integrations__BlikUrl=${INTEGRATIONS_BLIK_URL:-http://mock-gateways:6006}
-      - Integrations__KlikApiKey=dev-key
+      - Integrations__KlikApiKey=${INTEGRATIONS_KLIK_API_KEY:-dev-key}
       - Klik__WebhookSecret=${KLIK_WEBHOOK_SECRET}
       - Klik__AllowUnsignedWebhooks=${KLIK_ALLOW_UNSIGNED_WEBHOOKS:-false}
       - Cards__ApiKey=${CARDS_API_KEY}
@@ -66,6 +70,9 @@ services:
     networks:
       default: {}
       clearing-us-a-karty:
+        aliases:
+          - us-bank-a
+      target_klik:
         aliases:
           - us-bank-a
     restart: unless-stopped
@@ -107,4 +114,9 @@ networks:
     # Zewnętrzna sieć tworzona przez Karty-Platnicze-Aplikacje-Biznesowe.
     # Hostuje card-provider (/capture) i payment-gateway (Integrations__CardsUrl).
     # Uruchom tamten projekt pierwszy, żeby sieć istniała przed startem tego compose.
+    external: true
+  target_klik:
+    # Zewnętrzna sieć tworzona przez KLIK-payments.
+    # Serwis 'web' (Django KLIK, port 8000) jest w tej sieci.
+    # Uruchom KLIK-payments pierwszy, żeby sieć istniała.
     external: true

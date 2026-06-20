@@ -4,6 +4,15 @@
 # Użycie: bash test-api.sh [BASE_URL] [WEBHOOK_SECRET]
 
 set -uo pipefail
+
+# Załaduj .env jeśli istnieje (strip \r dla Windows CRLF)
+if [ -f "$(dirname "$0")/.env" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source <(sed 's/\r//' "$(dirname "$0")/.env")
+  set +a
+fi
+
 BASE_URL="${1:-${API_URL:-http://localhost:5100}}"
 WEBHOOK_SECRET="${2:-${WEBHOOK_SECRET:-dev_webhook_secret}}"
 
@@ -58,11 +67,27 @@ else PY=""; fi
 
 jget() {
   local json="$1" expr="$2"
-  [ -z "$PY" ] && { echo ""; return; }
+  if [ -n "$PY" ]; then
+    case "$expr" in
+      'length') printf '%s' "$json" | $PY -c "import sys,json; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0" ;;
+      *) local key="${expr#.}"
+         printf '%s' "$json" | $PY -c "import sys,json; d=json.load(sys.stdin); v=d.get('$key',''); print('' if v is None else v)" 2>/dev/null || echo "" ;;
+    esac
+    return
+  fi
+  # sed/grep fallback — works for scalar string and simple numeric values
   case "$expr" in
-    'length') printf '%s' "$json" | $PY -c "import sys,json; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0" ;;
-    *) local key="${expr#.}"
-       printf '%s' "$json" | $PY -c "import sys,json; d=json.load(sys.stdin); v=d.get('$key',''); print('' if v is None else v)" 2>/dev/null || echo "" ;;
+    'length')
+      printf '%s' "$json" | grep -o '"id"' | wc -l | tr -d ' '
+      ;;
+    *)
+      local key="${expr#.}" val
+      val=$(printf '%s' "$json" | grep -oE "\"${key}\":\"[^\"]*\"" | head -1 | sed "s/\"${key}\"://;s/^\"\(.*\)\"$/\1/")
+      if [ -z "$val" ]; then
+        val=$(printf '%s' "$json" | grep -oE "\"${key}\":[0-9a-zA-Z._-]+" | head -1 | sed "s/\"${key}\"://")
+      fi
+      printf '%s\n' "$val"
+      ;;
   esac
 }
 
@@ -81,10 +106,10 @@ echo -e "${GREEN}API działa${NC}"
 
 # Adresy integracji (z env lub z domyślnych)
 ACH_URL="${INTEGRATIONS_ACH_URL:-http://localhost:8310}"
-CARDS_URL="${INTEGRATIONS_CARDS_URL:-http://localhost:8072}"
+CARDS_URL="${INTEGRATIONS_CARDS_URL_HOST:-${INTEGRATIONS_CARDS_URL:-http://localhost:8072}}"
 RTP_URL="${INTEGRATIONS_RTP_URL:-http://localhost:6002}"
 FEDNOW_URL="${INTEGRATIONS_FEDNOW_URL:-http://localhost:6003}"
-SWIFT_URL="${INTEGRATIONS_SWIFT_URL:-http://localhost:6004}"
+SWIFT_URL="${INTEGRATIONS_SWIFT_URL:-http://localhost:3000}"
 SFTP_HOST="${Ach__Sftp__Host:-localhost}"
 SFTP_PORT="${Ach__Sftp__Port:-2221}"
 
@@ -139,8 +164,8 @@ http_up() {
 # Sprawdź port TCP przez Python socket
 port_open() {
   local host="$1" port="$2"
-  [ -n "$PY" ] || return 1
-  $PY -c "
+  if [ -n "$PY" ]; then
+    $PY -c "
 import socket, sys
 s = socket.socket()
 s.settimeout(3)
@@ -151,6 +176,10 @@ try:
 except Exception:
     sys.exit(1)
 " 2>/dev/null
+  else
+    # bash /dev/tcp fallback (Git Bash on Windows)
+    ( exec 3<>/dev/tcp/"$host"/"$port" ) 2>/dev/null
+  fi
 }
 
 # --- ACH Helper ---
@@ -604,7 +633,7 @@ R=$(req POST /transfers/ach -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"toAccountNumber\":\"555666777\",
   \"recipientName\":\"Jane Doe\",
   \"amount\":5.00,\"currency\":\"USD\",
-  \"description\":\"Bardzo długi opis przekraczający 22 znaki NACHA\"
+  \"description\":\"Very long description exceeding the 22-char NACHA field limit\"
 }")
 if $ACH_E2E; then
   check "POST /transfers/ach — długi description (truncated w NACHA) → 201" 201 "$(status "$R")"
@@ -775,7 +804,7 @@ section "13 · TRANSFERS — RTP"
 R=$(req POST /transfers/rtp -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toAccountNumber\":\"${JANE_CHECKING_NUM}\",
-  \"amount\":25.00,\"currency\":\"USD\",\"description\":\"RTP test\"
+  \"amount\":5.00,\"currency\":\"USD\",\"description\":\"RTP test\"
 }")
 check "POST /transfers/rtp — happy path → 201" 201 "$(status "$R")"
 
@@ -812,43 +841,301 @@ check "POST /transfers/fednow — brak środków → 400" 400 "$(status "$R")"
 # ═══════════════════════════════════════════════════════════════════════════════
 section "15 · TRANSFERS — SWIFT"
 # ═══════════════════════════════════════════════════════════════════════════════
+# BIC-i i IBAN-y zgodne z ACCOUNT_DIRECTORY SWIFT Middleware (istniejące konta)
+
+SWIFT_BIC_PL="PLBKPL01XXX"; SWIFT_IBAN_PL="PL61109010140000071219812874"
+SWIFT_BIC_DE="DEBKDE01XXX"; SWIFT_IBAN_DE="DE89370400440532013000"
+SWIFT_BIC_UK="UKBKGB01XXX"; SWIFT_IBAN_UK="GB29NWBK60161331926819"
+SWIFT_IBAN_CLOSED_UK="GB00CLOSED0000000000000000"
+SWIFT_TR_ID=""; SWIFT_UETR=""
+
+SWIFT_GW_URL="${INTEGRATIONS_SWIFT_URL:-http://localhost:3000}"
+SWIFT_GW_UP=false
+if http_up "${SWIFT_GW_URL}"; then
+  ok "SWIFT Middleware (${SWIFT_GW_URL}) — dostępny"
+  SWIFT_GW_UP=true
+else
+  fail "SWIFT Middleware (${SWIFT_GW_URL}) — NIEDOSTĘPNY (happy path → 400)"
+fi
+
+swift_check() {
+  local desc="$1" st="$2" bd="${3:-}"
+  if $SWIFT_GW_UP; then
+    check "${desc} → 201" 201 "${st}" "${bd}"
+  else
+    check_any "${desc} → 201|400 (gw off)" "201|400" "${st}" "${bd}"
+  fi
+}
+
+NEXT_YEAR=$($PY -c "from datetime import date; print((date.today().replace(year=date.today().year+1)).strftime('%Y-%m-%d'))" 2>/dev/null || echo "2027-06-19")
+
+# ── Walidacja pól — zawsze 400, niezależnie od gateway ────────────────────────
 
 R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
-  \"iban\":\"DE89370400440532013000\",\"bic\":\"DEUTDEDB\",
-  \"beneficiaryName\":\"Hans Müller\",
-  \"amount\":200.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
-}")
-check "POST /transfers/swift — happy path → 201" 201 "$(status "$R")"
-
-R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
-  \"fromAccountId\":\"${JOHN_CHECKING}\",
-  \"bic\":\"DEUTDEDB\",\"beneficiaryName\":\"Hans Müller\",
-  \"amount\":200.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
+  \"bic\":\"${SWIFT_BIC_PL}\",\"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
 }")
 check "POST /transfers/swift — brak iban → 400" 400 "$(status "$R")"
 
 R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
-  \"iban\":\"DE89370400440532013000\",\"beneficiaryName\":\"Hans Müller\",
-  \"amount\":200.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
+  \"iban\":\"NOTANIBAN\",\"bic\":\"${SWIFT_BIC_PL}\",\"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — nieprawidłowy IBAN → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
 }")
 check "POST /transfers/swift — brak bic → 400" 400 "$(status "$R")"
 
 R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
-  \"iban\":\"DE89370400440532013000\",\"bic\":\"DEUTDEDB\",
-  \"amount\":200.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"INVALID\",\"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — nieprawidłowy BIC (za krótki) → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"12345678\",\"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — BIC zaczyna się od cyfr → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
 }")
 check "POST /transfers/swift — brak beneficiaryName → 400" 400 "$(status "$R")"
 
 R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
-  \"iban\":\"DE89370400440532013000\",\"bic\":\"DEUTDEDB\",
-  \"beneficiaryName\":\"Hans Müller\",
-  \"amount\":0,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":0,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
 }")
 check "POST /transfers/swift — kwota = 0 → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":-1.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — kwota ujemna → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SPLIT\"
+}")
+check "POST /transfers/swift — nieprawidłowy chargeBearer → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"CRYPTO\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — nieobsługiwana waluta → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\",
+  \"valueDate\":\"2020-01-01\"
+}")
+check "POST /transfers/swift — valueDate w przeszłości → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_BOB}" -d "{
+  \"fromAccountId\":\"${BOB_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":999999.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — brak środków → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":100000.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — dzienny limit przekroczony (100k>50k) → 400" 400 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"00000000-0000-0000-0000-000000000000\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — fromAccountId nie istnieje → 404" 404 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JANE_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — cudze fromAccountId → 404" 404 "$(status "$R")"
+
+R=$(req POST /transfers/swift -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",
+  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+}")
+check "POST /transfers/swift — brak tokenu → 401" 401 "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}")
+check "POST /transfers/swift — brak body → 400" 400 "$(status "$R")"
+
+# ── Happy path + warianty ─────────────────────────────────────────────────────
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Jan Kowalski\",\"chargeBearer\":\"SHA\",
+  \"amount\":6.00,\"currency\":\"PLN\",
+  \"remittanceInfo\":\"Faktura 123/2026\"
+}")
+swift_check "POST /transfers/swift — PLN+SHA+remittance" "$(status "$R")" "$(body "$R")"
+SWIFT_TR_ID=$(jget "$(body "$R")" '.id')
+SWIFT_UETR=$(jget "$(body "$R")" '.externalReferenceId')
+info "Transfer ID=${SWIFT_TR_ID:-brak}, UETR=${SWIFT_UETR:-brak}"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_DE}\",\"bic\":\"${SWIFT_BIC_DE}\",
+  \"beneficiaryName\":\"Hans Mueller\",\"chargeBearer\":\"OUR\",
+  \"amount\":5.00,\"currency\":\"EUR\"
+}")
+swift_check "POST /transfers/swift — EUR+OUR do DE" "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_UK}\",\"bic\":\"${SWIFT_BIC_UK}\",
+  \"beneficiaryName\":\"John Smith\",\"chargeBearer\":\"BEN\",
+  \"amount\":4.00,\"currency\":\"GBP\",
+  \"valueDate\":\"${NEXT_YEAR}\"
+}")
+swift_check "POST /transfers/swift — GBP+BEN+valueDate" "$(status "$R")"
+
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
+  \"beneficiaryName\":\"Minimum\",\"chargeBearer\":\"SHA\",
+  \"amount\":1.00,\"currency\":\"USD\"
+}")
+swift_check "POST /transfers/swift — minimalne pola (USD)" "$(status "$R")"
+
+# Status po wysłaniu — pobieramy też UETR, bo odpowiedź POST go nie zawiera
+if [ -n "$SWIFT_TR_ID" ]; then
+  R=$(req GET "/transfers/${SWIFT_TR_ID}/status" -H "Authorization: Bearer ${TOKEN_JOHN}")
+  check "GET /transfers/{swiftId}/status — po wysłaniu → 200" 200 "$(status "$R")"
+  SWIFT_UETR=$(jget "$(body "$R")" '.externalReferenceId')
+  info "SWIFT status=$(jget "$(body "$R")" '.status'), UETR=${SWIFT_UETR:-brak}"
+else
+  skip "GET /transfers/{swiftId}/status" "brak SWIFT_TR_ID"
+fi
+
+# Zamknięte konto odbiorcy — middleware odrzuca (422) → gateway error → 400
+if $SWIFT_GW_UP; then
+  R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+    \"fromAccountId\":\"${JOHN_CHECKING}\",
+    \"iban\":\"${SWIFT_IBAN_CLOSED_UK}\",\"bic\":\"${SWIFT_BIC_UK}\",
+    \"beneficiaryName\":\"Closed Account\",\"chargeBearer\":\"SHA\",
+    \"amount\":10.00,\"currency\":\"GBP\"
+  }")
+  check "POST /transfers/swift — zamknięte konto odbiorcy → 400" 400 "$(status "$R")" "$(body "$R")"
+else
+  skip "POST /transfers/swift — zamknięte konto" "SWIFT gw off"
+fi
+
+# ── POST /transfers/swift/receive ─────────────────────────────────────────────
+# Endpoint wymaga X-SWIFT-Webhook-Secret — ustawiony w .env jako Swift__WebhookSecret
+
+FAKE_UETR="11111111-2222-4333-8444-555555555555"
+RECEIVE_URL="${BASE_URL}/transfers/swift/receive"
+SWIFT_WEBHOOK_SECRET="${Swift__WebhookSecret:-dev_swift_webhook_secret}"
+
+xml_post() {
+  # xml_post <extra-headers-as-separate-args> -- <xml-body>
+  # Automatycznie dodaje X-SWIFT-Webhook-Secret z env.
+  # Usage: xml_post -H "Foo: bar" -- "<xml..."
+  local args=() xml=""
+  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+    args+=("$1")
+    shift
+  done
+  shift 2>/dev/null || true  # skip --
+  xml="$*"
+  local tmp; tmp=$(mktemp)
+  local code
+  code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST \
+    -H "Content-Type: application/xml" \
+    -H "X-SWIFT-Webhook-Secret: ${SWIFT_WEBHOOK_SECRET}" \
+    "${args[@]}" \
+    -d "${xml}" \
+    "${RECEIVE_URL}" 2>/dev/null) || code="000"
+  local b; b=$(cat "$tmp"); rm -f "$tmp"
+  printf '%s|%s' "$code" "$b"
+}
+
+PLAIN_XML='<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"><FIToFICstmrCdtTrf><GrpHdr><MsgId>MSG-TEST</MsgId><CreDtTm>2026-06-19T12:00:00Z</CreDtTm><NbOfTxs>1</NbOfTxs></GrpHdr><CdtTrfTxInf><PmtId><InstrId>INST-TEST</InstrId><UETR>'"${FAKE_UETR}"'</UETR></PmtId><IntrBkSttlmAmt Ccy="USD">100.00</IntrBkSttlmAmt><InstdAmt Ccy="USD">100.00</InstdAmt><ChrgBr>SHAR</ChrgBr><Dbtr><Nm>Test Sender</Nm></Dbtr><DbtrAcct><Id><IBAN>'"${SWIFT_IBAN_PL}"'</IBAN></Id></DbtrAcct><DbtrAgt><FinInstnId><BICFI>'"${SWIFT_BIC_PL}"'</BICFI></FinInstnId></DbtrAgt><Cdtr><Nm>Test Receiver</Nm></Cdtr><CdtrAgt><FinInstnId><BICFI>USBKUS01XXX</BICFI></FinInstnId></CdtrAgt><CdtrAcct><Id><Othr><Id>US123456789012345678901234</Id></Othr></Id></CdtrAcct><RmtInf><Ustrd>Test incoming</Ustrd></RmtInf></CdtTrfTxInf></FIToFICstmrCdtTrf></Document>'
+
+RETURN_XML='<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"><FIToFICstmrCdtTrf><GrpHdr><MsgId>RETURN-TEST</MsgId><CreDtTm>2026-06-19T12:00:00Z</CreDtTm></GrpHdr><CdtTrfTxInf><PmtId><InstrId>RET-INST</InstrId><UETR>'"${FAKE_UETR}"'</UETR></PmtId><IntrBkSttlmAmt Ccy="USD">100.00</IntrBkSttlmAmt><RmtInf><Ustrd>Zwrot</Ustrd></RmtInf><DbtrAgt><FinInstnId><BICFI>'"${SWIFT_BIC_PL}"'</BICFI></FinInstnId></DbtrAgt><CdtrAgt><FinInstnId><BICFI>USBKUS01XXX</BICFI></FinInstnId></CdtrAgt></CdtTrfTxInf></FIToFICstmrCdtTrf></Document>'
+
+NO_UETR_XML='<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"><FIToFICstmrCdtTrf><CdtTrfTxInf><PmtId><InstrId>NO-UETR</InstrId></PmtId></CdtTrfTxInf></FIToFICstmrCdtTrf></Document>'
+
+# Brak sekretu → 401
+R=$(curl -s -o /dev/null -w "%{http_code}|" -X POST \
+  -H "Content-Type: application/xml" \
+  -H "X-SWIFT-UETR: ${FAKE_UETR}" \
+  -d "${PLAIN_XML}" \
+  "${RECEIVE_URL}" 2>/dev/null)
+check "POST /transfers/swift/receive — brak sekretu → 401" 401 "$(status "$R|")"
+
+# Normalny przychodzący — nieznany UETR → graceful, 200
+R=$(xml_post -H "X-SWIFT-UETR: ${FAKE_UETR}" -- "${PLAIN_XML}")
+check "POST /transfers/swift/receive — nieznany UETR (graceful) → 200" 200 "$(status "$R")" "$(body "$R")"
+info "Receive body: $(body "$R" | head -c 120)"
+
+# RETURN przez nagłówek X-SWIFT-Message-Type: RETURN
+R=$(xml_post -H "X-SWIFT-Message-Type: RETURN" -H "X-SWIFT-UETR: ${FAKE_UETR}" -- "${PLAIN_XML}")
+check "POST /transfers/swift/receive — RETURN (nagłówek) → 200" 200 "$(status "$R")"
+
+# Brak UETR (w XML i w nagłówku) → 400
+R=$(xml_post -- "${NO_UETR_XML}")
+check "POST /transfers/swift/receive — brak UETR w XML → 400" 400 "$(status "$R")"
+
+# E2E complete — jeśli mamy prawdziwy transfer z UETR z SWIFT Middleware
+if $SWIFT_GW_UP && [ -n "$SWIFT_TR_ID" ] && [ -n "$SWIFT_UETR" ] && [ "$SWIFT_UETR" != "null" ] && [ "$SWIFT_UETR" != "" ]; then
+  info "E2E complete: symulacja forwardu od middleware z UETR=${SWIFT_UETR}"
+  COMPLETE_XML='<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"><FIToFICstmrCdtTrf><GrpHdr><MsgId>MSG-DONE</MsgId><CreDtTm>2026-06-19T13:00:00Z</CreDtTm><NbOfTxs>1</NbOfTxs></GrpHdr><CdtTrfTxInf><PmtId><InstrId>INST-DONE</InstrId><UETR>'"${SWIFT_UETR}"'</UETR></PmtId><IntrBkSttlmAmt Ccy="PLN">50.00</IntrBkSttlmAmt><InstdAmt Ccy="PLN">50.00</InstdAmt><ChrgBr>SHAR</ChrgBr><Dbtr><Nm>John Doe</Nm></Dbtr><DbtrAcct><Id><IBAN>US0000000000000000001</IBAN></Id></DbtrAcct><DbtrAgt><FinInstnId><BICFI>USBKUS01XXX</BICFI></FinInstnId></DbtrAgt><Cdtr><Nm>Jan Kowalski</Nm></Cdtr><CdtrAgt><FinInstnId><BICFI>'"${SWIFT_BIC_PL}"'</BICFI></FinInstnId></CdtrAgt><CdtrAcct><Id><Othr><Id>'"${SWIFT_IBAN_PL}"'</Id></Othr></Id></CdtrAcct><RmtInf><Ustrd>Faktura 123/2026</Ustrd></RmtInf></CdtTrfTxInf></FIToFICstmrCdtTrf></Document>'
+
+  R=$(xml_post -H "X-SWIFT-UETR: ${SWIFT_UETR}" -- "${COMPLETE_XML}")
+  check "POST /transfers/swift/receive — E2E complete z prawdziwym UETR → 200" 200 "$(status "$R")" "$(body "$R")"
+
+  R=$(req GET "/transfers/${SWIFT_TR_ID}/status" -H "Authorization: Bearer ${TOKEN_JOHN}")
+  check "GET /transfers/{swiftId}/status — po /receive → 200" 200 "$(status "$R")"
+  FINAL_STATUS=$(jget "$(body "$R")" '.status')
+  if [ "${FINAL_STATUS}" = "completed" ]; then
+    ok "SWIFT transfer status = completed po /receive (E2E sukces)"
+  else
+    fail "SWIFT transfer status = '${FINAL_STATUS}' (oczekiwano 'completed')" "$(body "$R")"
+  fi
+else
+  skip "POST /transfers/swift/receive — E2E complete" "SWIFT gw off lub brak UETR"
+  skip "GET status po /receive — E2E complete" "SWIFT gw off lub brak UETR"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 section "16 · TRANSFERS — approve / reject"
@@ -1248,23 +1535,34 @@ check "POST /klik/webhook/ping — zły secret → 401" 401 "$(status "$R")"
 section "26 · BLIK — pełny flow (generate → simulate/initiate → pending → approve/reject)"
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Mock jest dostępny bezpośrednio z hosta na porcie 6006
-KLIK_MOCK_URL="${INTEGRATIONS_BLIK_URL_HOST:-http://localhost:6006}"
+# Realny KLIK dostępny na porcie 8900 (KLIK-payments docker-compose.override.yml)
+KLIK_URL="${KLIK_HOST_URL:-http://localhost:8900}"
+KLIK_AGENT_KEY="${KLIK_AGENT_API_KEY:-}"
+KLIK_MID="${KLIK_MERCHANT_ID:-}"
 
-mock_up() {
+klik_up() {
   local code
-  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "${KLIK_MOCK_URL}/health" 2>/dev/null) || code="000"
-  [ "$code" != "000" ]
+  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "${KLIK_URL}/healthz/" 2>/dev/null) || code="000"
+  [ "$code" = "200" ]
 }
 
 simulate_initiate() {
-  local code="$1" amount="$2" merchant="$3"
+  local code="$1" amount="$2"
+  local idem="idem-${TS}-$(date +%s%N 2>/dev/null || date +%s)"
   curl -s -X POST -H "Content-Type: application/json" \
-    -d "{\"code\":\"${code}\",\"amount\":${amount},\"currency\":\"USD\",\"merchant_name\":\"${merchant}\",\"is_on_us\":false}" \
-    "${KLIK_MOCK_URL}/simulate/initiate" 2>/dev/null
+    -H "X-KLIK-Agent-Api-Key: ${KLIK_AGENT_KEY}" \
+    -H "Idempotency-Key: ${idem}" \
+    -d "{\"code\":\"${code}\",\"amount\":\"${amount}\",\"currency\":\"USD\",\"merchant_id\":\"${KLIK_MID}\"}" \
+    "${KLIK_URL}/api/v1/payments/initiate" 2>/dev/null
 }
 
-if [ -n "$JOHN_USER_ID" ] && mock_up; then
+KLIK_READY=false
+if [ -n "$KLIK_AGENT_KEY" ] && [ -n "$KLIK_MID" ] && klik_up; then
+  KLIK_READY=true
+fi
+info "KLIK ready=${KLIK_READY} url=${KLIK_URL} agent_key=${KLIK_AGENT_KEY:0:12}... merchant=${KLIK_MID}"
+
+if [ -n "$JOHN_USER_ID" ] && [ "$KLIK_READY" = "true" ]; then
 
   # --- Approve flow ---
   R=$(req POST /blik/generate -H "Authorization: Bearer ${TOKEN_JOHN}" \
@@ -1273,15 +1571,19 @@ if [ -n "$JOHN_USER_ID" ] && mock_up; then
   info "Generated BLIK code: ${FLOW_CODE}"
 
   if [ -n "$FLOW_CODE" ]; then
-    INIT_RESP=$(simulate_initiate "$FLOW_CODE" "5.00" "Flow Shop")
-    info "Simulate initiate: $(echo "$INIT_RESP" | head -c 80)"
-    sleep 1  # poczekaj na async webhook do naszego API
+    INIT_RESP=$(simulate_initiate "$FLOW_CODE" "5.00")
+    info "KLIK initiate: $(echo "$INIT_RESP" | head -c 120)"
+    sleep 3  # poczekaj na async webhook Celery → us-bank-system
 
     R=$(req GET /blik/pending -H "Authorization: Bearer ${TOKEN_JOHN}")
     check "Pełny flow — GET /blik/pending → 200" 200 "$(status "$R")"
     info "Oczekujące autoryzacje: $(jget "$(body "$R")" 'length')"
 
-    BLIK_AUTH_ID=$($PY -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')" 2>/dev/null <<< "$(body "$R")")
+    if [ -n "$PY" ]; then
+      BLIK_AUTH_ID=$($PY -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')" 2>/dev/null <<< "$(body "$R")")
+    else
+      BLIK_AUTH_ID=$(printf '%s' "$(body "$R")" | grep -oE '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"//')
+    fi
 
     if [ -n "$BLIK_AUTH_ID" ]; then
       R=$(req POST "/blik/${BLIK_AUTH_ID}/approve" -H "Authorization: Bearer ${TOKEN_JOHN}")
@@ -1305,11 +1607,15 @@ if [ -n "$JOHN_USER_ID" ] && mock_up; then
   REJECT_CODE=$(jget "$(body "$R")" '.code')
 
   if [ -n "$REJECT_CODE" ]; then
-    simulate_initiate "$REJECT_CODE" "3.00" "Reject Shop" > /dev/null
-    sleep 1
+    simulate_initiate "$REJECT_CODE" "3.00" > /dev/null
+    sleep 3  # poczekaj na async webhook
 
     R=$(req GET /blik/pending -H "Authorization: Bearer ${TOKEN_JOHN}")
-    REJECT_AUTH_ID=$($PY -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')" 2>/dev/null <<< "$(body "$R")")
+    if [ -n "$PY" ]; then
+      REJECT_AUTH_ID=$($PY -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')" 2>/dev/null <<< "$(body "$R")")
+    else
+      REJECT_AUTH_ID=$(printf '%s' "$(body "$R")" | grep -oE '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"//')
+    fi
 
     if [ -n "$REJECT_AUTH_ID" ]; then
       R=$(req POST "/blik/${REJECT_AUTH_ID}/reject" -H "Authorization: Bearer ${TOKEN_JOHN}")
@@ -1336,8 +1642,10 @@ if [ -n "$JOHN_USER_ID" ] && mock_up; then
 
 elif [ -z "$JOHN_USER_ID" ]; then
   skip "pełny BLIK flow — wszystkie" "brak JOHN_USER_ID"
+elif [ -z "$KLIK_AGENT_KEY" ] || [ -z "$KLIK_MID" ]; then
+  skip "pełny BLIK flow — wszystkie" "brak KLIK_AGENT_API_KEY lub KLIK_MERCHANT_ID w .env"
 else
-  skip "pełny BLIK flow — wszystkie" "KLIK mock (${KLIK_MOCK_URL}) niedostępny"
+  skip "pełny BLIK flow — wszystkie" "KLIK (${KLIK_URL}) niedostępny"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

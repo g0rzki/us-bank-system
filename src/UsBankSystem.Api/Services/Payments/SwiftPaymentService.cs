@@ -22,6 +22,9 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
         var valueDate = SwiftRequestValidator.ResolveValueDate(request.ValueDate);
 
         var fromAccount = await ResolveFromAccountAsync(userId, request.FromAccountId);
+        var fromUser = await Db.Users.FindAsync(fromAccount.UserId)
+            ?? throw new InvalidOperationException($"User {fromAccount.UserId} not found for account {fromAccount.Id}");
+        var fromAccountName = $"{fromUser.FirstName} {fromUser.LastName}".Trim();
 
         var availableBalance = fromAccount.Balance - fromAccount.ReservedBalance;
         if (availableBalance < request.Amount)
@@ -67,7 +70,9 @@ public class SwiftPaymentService(AppDbContext db, SwiftGateway swiftGateway, IOp
                 ["beneficiaryAddress"] = request.BeneficiaryAddress ?? "",
                 ["chargeBearer"] = request.ChargeBearer,
                 ["valueDate"] = valueDate.ToString("yyyyMMdd"),
-                ["remittanceInfo"] = request.RemittanceInfo ?? ""
+                ["remittanceInfo"] = request.RemittanceInfo ?? "",
+                ["fromAccountNumber"] = fromAccount.AccountNumber,
+                ["fromAccountName"] = fromAccountName
             }
         ));
 
