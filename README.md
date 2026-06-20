@@ -99,7 +99,6 @@ Panel administracyjny FedSystems dostępny pod `:3310`.
 
 **Znane ograniczenia:**
 
-- Pełny test pacs.008→pacs.002→Completed wymaga drugiej bank-app po stronie odbiorcy z auto-response pipeline. Dodatkowo, zidentyfikowano błąd w logice dopasowania wiadomości pacs.002 po stronie FedSystems, który może uniemożliwić finalizację cyklu gdy w systemie jest więcej niż jedna wiadomość pending jednocześnie — zgłoszone do zespołu FedSystems.
 - CreditorBankName zawsze "Unknown Bank" — brak lookupa RTN→nazwa w systemie.
 - Settlement T+{czas} nie jest implementowany — transfer przechodzi w Completed po pacs.002 ACCP, bez mechanizmu opóźnionego rozliczenia.
 
