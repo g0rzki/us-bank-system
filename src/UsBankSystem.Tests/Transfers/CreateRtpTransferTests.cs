@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Security.Claims;
+using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -59,6 +60,9 @@ public class CreateRtpTransferTests
         NullLogger<RtpTchGateway>.Instance);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode rtpStatus = HttpStatusCode.OK, HttpStatusCode rtpTchStatus = HttpStatusCode.OK)
+        => CreateControllerWithHandler(db, userId, new MockHttpMessageHandler(rtpTchStatus, "<xml/>"), rtpStatus);
+
+    private TransfersController CreateControllerWithHandler(AppDbContext db, Guid userId, HttpMessageHandler rtpTchHandler, HttpStatusCode rtpStatus = HttpStatusCode.OK)
     {
         var mqGateway = new FedNowMqGateway(
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{"status":"sent"}"""))
@@ -68,7 +72,10 @@ public class CreateRtpTransferTests
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6004") },
             NullLogger<SwiftGateway>.Instance);
-        var rtpTchGateway = CreateRtpTchGateway(rtpTchStatus);
+        var rtpTchGateway = new RtpTchGateway(
+            new HttpClient(rtpTchHandler) { BaseAddress = new Uri("http://localhost:8200") },
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+            NullLogger<RtpTchGateway>.Instance);
         var internalPayment = new InternalPaymentService(db);
         var achPayment = new AchPaymentService(db, CreateAchGateway(), CreatePaymentConfig());
         var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(rtpStatus), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
@@ -325,6 +332,32 @@ public class CreateRtpTransferTests
         }));
         var account = await db.Accounts.FindAsync(fromAccountId);
         Assert.Equal(0m, account!.ReservedBalance);
+    }
+
+    [Fact]
+    public async Task CreateRtpExternal_Pacs008ContainsCorrectBankCode()
+    {
+        var (db, userId, fromAccountId, _) = await Setup();
+        var handler = new CapturingHttpMessageHandler(HttpStatusCode.OK, "<xml/>");
+        var controller = CreateControllerWithHandler(db, userId, handler);
+        await controller.CreateRtp(new CreateRtpTransferRequest
+        {
+            FromAccountId = fromAccountId,
+            ToAccountNumber = "999888777666",
+            ToRoutingNumber = "010101012",
+            ToBankCode = "BANKA",
+            RecipientName = "Miku",
+            Amount = 100m
+        });
+
+        Assert.NotNull(handler.LastRequestBody);
+        var ns = Pacs008Parser.Ns;
+        var doc = XDocument.Parse(handler.LastRequestBody);
+        var cdtrAgtNm = doc.Descendants(ns + "CdtrAgt")
+            .Descendants(ns + "ClrSysMmbId")
+            .Elements(ns + "nm")
+            .FirstOrDefault()?.Value;
+        Assert.Equal("BANKA", cdtrAgtNm);
     }
 }
 
