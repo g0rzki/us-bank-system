@@ -827,6 +827,7 @@ section "14 · TRANSFERS — FedNow"
 R=$(req POST /transfers/fednow -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"toAccountNumber\":\"${BOB_CHECKING_NUM}\",
+  \"toRoutingNumber\":\"010101012\",
   \"amount\":15.00,\"currency\":\"USD\"
 }")
 check "POST /transfers/fednow — happy path → 201" 201 "$(status "$R")"
@@ -958,7 +959,7 @@ R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_BOB}" -d "{
   \"fromAccountId\":\"${BOB_CHECKING}\",
   \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
   \"beneficiaryName\":\"Jan Kowalski\",
-  \"amount\":999999.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+  \"amount\":999999.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
 }")
 check "POST /transfers/swift — brak środków → 400" 400 "$(status "$R")"
 
@@ -966,7 +967,7 @@ R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
   \"beneficiaryName\":\"Jan Kowalski\",
-  \"amount\":100000.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+  \"amount\":100000.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
 }")
 check "POST /transfers/swift — dzienny limit przekroczony (100k>50k) → 400" 400 "$(status "$R")"
 
@@ -974,7 +975,7 @@ R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"00000000-0000-0000-0000-000000000000\",
   \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
   \"beneficiaryName\":\"Jan Kowalski\",
-  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+  \"amount\":50.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
 }")
 check "POST /transfers/swift — fromAccountId nie istnieje → 404" 404 "$(status "$R")"
 
@@ -982,7 +983,7 @@ R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JANE_CHECKING}\",
   \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
   \"beneficiaryName\":\"Jan Kowalski\",
-  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+  \"amount\":50.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
 }")
 check "POST /transfers/swift — cudze fromAccountId → 404" 404 "$(status "$R")"
 
@@ -990,7 +991,7 @@ R=$(req POST /transfers/swift -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
   \"beneficiaryName\":\"Jan Kowalski\",
-  \"amount\":50.00,\"currency\":\"PLN\",\"chargeBearer\":\"SHA\"
+  \"amount\":50.00,\"currency\":\"USD\",\"chargeBearer\":\"SHA\"
 }")
 check "POST /transfers/swift — brak tokenu → 401" 401 "$(status "$R")"
 
@@ -1003,10 +1004,10 @@ R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
   \"beneficiaryName\":\"Jan Kowalski\",\"chargeBearer\":\"SHA\",
-  \"amount\":6.00,\"currency\":\"PLN\",
+  \"amount\":6.00,\"currency\":\"USD\",
   \"remittanceInfo\":\"Faktura 123/2026\"
 }")
-swift_check "POST /transfers/swift — PLN+SHA+remittance" "$(status "$R")" "$(body "$R")"
+swift_check "POST /transfers/swift — USD+SHA+remittance" "$(status "$R")" "$(body "$R")"
 SWIFT_TR_ID=$(jget "$(body "$R")" '.id')
 SWIFT_UETR=$(jget "$(body "$R")" '.externalReferenceId')
 info "Transfer ID=${SWIFT_TR_ID:-brak}, UETR=${SWIFT_UETR:-brak}"
@@ -1015,26 +1016,34 @@ R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"iban\":\"${SWIFT_IBAN_DE}\",\"bic\":\"${SWIFT_BIC_DE}\",
   \"beneficiaryName\":\"Hans Mueller\",\"chargeBearer\":\"OUR\",
-  \"amount\":5.00,\"currency\":\"EUR\"
+  \"amount\":5.00,\"currency\":\"USD\",\"valueDate\":\"${NEXT_YEAR}\"
 }")
-swift_check "POST /transfers/swift — EUR+OUR do DE" "$(status "$R")"
+swift_check "POST /transfers/swift — USD+OUR do DE+valueDate" "$(status "$R")"
 
 R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
   \"iban\":\"${SWIFT_IBAN_UK}\",\"bic\":\"${SWIFT_BIC_UK}\",
   \"beneficiaryName\":\"John Smith\",\"chargeBearer\":\"BEN\",
-  \"amount\":4.00,\"currency\":\"GBP\",
-  \"valueDate\":\"${NEXT_YEAR}\"
+  \"amount\":4.00,\"currency\":\"USD\"
 }")
-swift_check "POST /transfers/swift — GBP+BEN+valueDate" "$(status "$R")"
+swift_check "POST /transfers/swift — USD+BEN do UK" "$(status "$R")"
+
+# Outgoing non-USD must be rejected (auto-conversion only for incoming)
+R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
+  \"fromAccountId\":\"${JOHN_CHECKING}\",
+  \"iban\":\"${SWIFT_IBAN_DE}\",\"bic\":\"${SWIFT_BIC_DE}\",
+  \"beneficiaryName\":\"Hans Mueller\",\"chargeBearer\":\"SHA\",
+  \"amount\":5.00,\"currency\":\"EUR\"
+}")
+check "POST /transfers/swift — waluta EUR (nie USD) → 400" 400 "$(status "$R")"
 
 R=$(req POST /transfers/swift -H "Authorization: Bearer ${TOKEN_JOHN}" -d "{
   \"fromAccountId\":\"${JOHN_CHECKING}\",
-  \"iban\":\"${SWIFT_IBAN_PL}\",\"bic\":\"${SWIFT_BIC_PL}\",
-  \"beneficiaryName\":\"Minimum\",\"chargeBearer\":\"SHA\",
-  \"amount\":1.00,\"currency\":\"USD\"
+  \"iban\":\"${SWIFT_IBAN_UK}\",\"bic\":\"${SWIFT_BIC_UK}\",
+  \"beneficiaryName\":\"John Smith\",\"chargeBearer\":\"SHA\",
+  \"amount\":4.00,\"currency\":\"GBP\"
 }")
-swift_check "POST /transfers/swift — minimalne pola (USD)" "$(status "$R")"
+check "POST /transfers/swift — waluta GBP (nie USD) → 400" 400 "$(status "$R")"
 
 # Status po wysłaniu — pobieramy też UETR, bo odpowiedź POST go nie zawiera
 if [ -n "$SWIFT_TR_ID" ]; then
@@ -1052,7 +1061,7 @@ if $SWIFT_GW_UP; then
     \"fromAccountId\":\"${JOHN_CHECKING}\",
     \"iban\":\"${SWIFT_IBAN_CLOSED_UK}\",\"bic\":\"${SWIFT_BIC_UK}\",
     \"beneficiaryName\":\"Closed Account\",\"chargeBearer\":\"SHA\",
-    \"amount\":10.00,\"currency\":\"GBP\"
+    \"amount\":10.00,\"currency\":\"USD\"
   }")
   check "POST /transfers/swift — zamknięte konto odbiorcy → 400" 400 "$(status "$R")" "$(body "$R")"
 else
@@ -1065,6 +1074,8 @@ fi
 FAKE_UETR="11111111-2222-4333-8444-555555555555"
 RECEIVE_URL="${BASE_URL}/transfers/swift/receive"
 SWIFT_WEBHOOK_SECRET="${Swift__WebhookSecret:-dev_swift_webhook_secret}"
+SWIFT_SECRET_CONFIGURED=false
+[ -n "${Swift__WebhookSecret:-}" ] && SWIFT_SECRET_CONFIGURED=true
 
 xml_post() {
   # xml_post <extra-headers-as-separate-args> -- <xml-body>
@@ -1095,13 +1106,17 @@ RETURN_XML='<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:i
 
 NO_UETR_XML='<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"><FIToFICstmrCdtTrf><CdtTrfTxInf><PmtId><InstrId>NO-UETR</InstrId></PmtId></CdtTrfTxInf></FIToFICstmrCdtTrf></Document>'
 
-# Brak sekretu → 401
-R=$(curl -s -o /dev/null -w "%{http_code}|" -X POST \
-  -H "Content-Type: application/xml" \
-  -H "X-SWIFT-UETR: ${FAKE_UETR}" \
-  -d "${PLAIN_XML}" \
-  "${RECEIVE_URL}" 2>/dev/null)
-check "POST /transfers/swift/receive — brak sekretu → 401" 401 "$(status "$R|")"
+# Brak sekretu → 401 (tylko gdy Swift__WebhookSecret skonfigurowany)
+if $SWIFT_SECRET_CONFIGURED; then
+  R=$(curl -s -o /dev/null -w "%{http_code}|" -X POST \
+    -H "Content-Type: application/xml" \
+    -H "X-SWIFT-UETR: ${FAKE_UETR}" \
+    -d "${PLAIN_XML}" \
+    "${RECEIVE_URL}" 2>/dev/null)
+  check "POST /transfers/swift/receive — brak sekretu → 401" 401 "$(status "$R|")"
+else
+  skip "POST /transfers/swift/receive — brak sekretu → 401" "Swift__WebhookSecret nie skonfigurowany (middleware nie wysyła sekretu)"
+fi
 
 # Normalny przychodzący — nieznany UETR → graceful, 200
 R=$(xml_post -H "X-SWIFT-UETR: ${FAKE_UETR}" -- "${PLAIN_XML}")
@@ -1337,11 +1352,11 @@ if [ -n "$TEST_CARD_DEBIT_ID" ] && [ -n "$TEST_ACCOUNT_ID" ]; then
 
   R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
     -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"status":"active"}')
-  check "PATCH /cards/{id}/status — active (odblokuj) → 200" 200 "$(status "$R")"
+  check "PATCH /cards/{id}/status — active w ciągu 24h → 409 (cooldown)" 409 "$(status "$R")"
 
   R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
     -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"status":"active"}')
-  check "PATCH /cards/{id}/status — active na active → 409" 409 "$(status "$R")"
+  check "PATCH /cards/{id}/status — block ponownie (nadal zablokowana) → 409" 409 "$(status "$R")"
 
   R=$(req PATCH "/accounts/${TEST_ACCOUNT_ID}/cards/${TEST_CARD_DEBIT_ID}/status" \
     -H "Authorization: Bearer ${TOKEN_TEST}" -d '{"status":"expired"}')

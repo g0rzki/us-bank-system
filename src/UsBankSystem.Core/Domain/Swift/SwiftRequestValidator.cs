@@ -22,8 +22,8 @@ public static class SwiftRequestValidator
         if (!ValidChargeBearers.Contains(chargeBearer.ToUpperInvariant()))
             throw new ArgumentException($"Invalid ChargeBearer '{chargeBearer}'. Must be SHA, OUR or BEN");
 
-        if (!SupportedCurrencies.Contains(currency.ToUpperInvariant()))
-            throw new ArgumentException($"Unsupported currency '{currency}' for SWIFT transfer");
+        if (currency.ToUpperInvariant() != "USD")
+            throw new ArgumentException("Outgoing SWIFT transfers must be in USD. Incoming transfers in other currencies are auto-converted on receipt.");
 
         if (valueDate.HasValue && valueDate.Value < DateOnly.FromDateTime(DateTime.UtcNow))
             throw new ArgumentException("ValueDate cannot be in the past");

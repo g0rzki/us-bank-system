@@ -217,6 +217,46 @@ public class SwiftGateway(
         }
     }
 
+    public record IncomingSwiftPayment(string Uetr, decimal Amount, string Currency, string? CreditorAccount, string? Description);
+
+    // Parses a pacs.008 XML forwarded by the SWIFT middleware (incoming transfer to us).
+    public static IncomingSwiftPayment? ParseIncoming(string xml)
+    {
+        try
+        {
+            var doc = XDocument.Parse(xml);
+            XNamespace ns = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08";
+
+            var txInfo = doc.Descendants(ns + "CdtTrfTxInf").FirstOrDefault();
+            if (txInfo is null) return null;
+
+            var uetr = txInfo.Descendants(ns + "UETR").FirstOrDefault()?.Value;
+            if (string.IsNullOrWhiteSpace(uetr)) return null;
+
+            var amtElem = txInfo.Element(ns + "IntrBkSttlmAmt") ?? txInfo.Element(ns + "InstdAmt");
+            if (amtElem is null || !decimal.TryParse(amtElem.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var amount))
+                return null;
+
+            var currency = amtElem.Attribute("Ccy")?.Value ?? "USD";
+
+            // Creditor account: try Othr/Id first, then IBAN
+            var creditorAccount =
+                txInfo.Descendants(ns + "CdtrAcct").FirstOrDefault()
+                    ?.Descendants(ns + "Id").FirstOrDefault()
+                    ?.Elements()
+                    .Select(e => e.Element(ns + "Id")?.Value ?? e.Value)
+                    .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+            var description = txInfo.Descendants(ns + "Ustrd").FirstOrDefault()?.Value;
+
+            return new IncomingSwiftPayment(uetr, amount, currency, creditorAccount, description);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private record TokenResponse([property: JsonPropertyName("access_token")] string? AccessToken);
     private record SwiftMessageResponse(string? Uetr, List<string>? Route, string? Status);
 }

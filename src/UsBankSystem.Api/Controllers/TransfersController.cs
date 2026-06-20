@@ -145,7 +145,7 @@ public class TransfersController(
         if (string.IsNullOrWhiteSpace(uetr))
             return BadRequest(new { message = "Missing UETR in request" });
 
-        await transferService.ProcessSwiftReceiveAsync(uetr, isReturn, cancellationToken);
+        await transferService.ProcessSwiftReceiveAsync(uetr, isReturn, xml, cancellationToken);
 
         return Ok(new { status = isReturn ? "return_received" : "received", uetr });
     }

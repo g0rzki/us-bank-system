@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
+using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Integrations.FedNow;
 using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Models.Responses;
@@ -195,7 +196,7 @@ public class TransferService(
         return PaymentServiceBase.MapToResponse(transfer);
     }
 
-    public async Task ProcessSwiftReceiveAsync(string uetr, bool isReturn, CancellationToken ct = default)
+    public async Task ProcessSwiftReceiveAsync(string uetr, bool isReturn, string xml, CancellationToken ct = default)
     {
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
 
@@ -203,7 +204,21 @@ public class TransferService(
             .Include(t => t.FromAccount)
             .FirstOrDefaultAsync(t => t.ExternalReferenceId == uetr, ct);
 
-        if (transfer is null || transfer.Status != TransferStatus.Pending)
+        if (transfer is null)
+        {
+            if (!isReturn)
+            {
+                await ProcessIncomingSwiftAsync(uetr, xml, ct);
+                await tx.CommitAsync(ct);
+            }
+            else
+            {
+                await tx.RollbackAsync(ct);
+            }
+            return;
+        }
+
+        if (transfer.Status != TransferStatus.Pending)
         {
             await tx.RollbackAsync(ct);
             return;
@@ -211,7 +226,7 @@ public class TransferService(
 
         if (isReturn)
         {
-            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            transfer.FromAccount!.ReservedBalance -= transfer.Amount;
             transfer.Status = TransferStatus.Failed;
 
             var debit = await db.Transactions.FirstOrDefaultAsync(
@@ -221,7 +236,7 @@ public class TransferService(
         }
         else
         {
-            transfer.FromAccount.Balance -= transfer.Amount;
+            transfer.FromAccount!.Balance -= transfer.Amount;
             transfer.FromAccount.ReservedBalance -= transfer.Amount;
             transfer.Status = TransferStatus.Completed;
             transfer.CompletedAt = DateTime.UtcNow;
@@ -234,6 +249,62 @@ public class TransferService(
 
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
+    }
+
+    private async Task ProcessIncomingSwiftAsync(string uetr, string xml, CancellationToken ct)
+    {
+        var parsed = SwiftGateway.ParseIncoming(xml);
+        if (parsed is null) return;
+
+        // Find the recipient account by account number or partial IBAN match.
+        var creditorRef = parsed.CreditorAccount?.Trim();
+        if (string.IsNullOrWhiteSpace(creditorRef)) return;
+
+        var account = await db.Accounts.FirstOrDefaultAsync(
+            a => a.AccountNumber == creditorRef || creditorRef.EndsWith(a.AccountNumber), ct);
+        if (account is null) return;
+
+        // Convert incoming currency to USD.
+        var amountUsd = parsed.Amount;
+        if (!string.Equals(parsed.Currency, "USD", StringComparison.OrdinalIgnoreCase))
+        {
+            var rate = await db.ExchangeRates.FindAsync([parsed.Currency.ToUpperInvariant()], ct);
+            if (rate is null) return;
+            amountUsd = Math.Round(parsed.Amount * rate.RateToUsd, 2);
+        }
+
+        account.Balance += amountUsd;
+
+        var incomingTransfer = new Transfer
+        {
+            Id = Guid.NewGuid(),
+            FromAccountId = null,
+            ToAccountId = account.Id,
+            Amount = amountUsd,
+            Currency = "USD",
+            Channel = TransferChannel.Swift,
+            Status = TransferStatus.Completed,
+            ExternalReferenceId = uetr,
+            Description = parsed.Description ?? $"Incoming SWIFT ({parsed.Currency}→USD)",
+            RequiresApproval = false,
+            CreatedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        };
+        db.Transfers.Add(incomingTransfer);
+
+        db.Transactions.Add(new Transaction
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            Amount = amountUsd,
+            Type = TransactionType.Credit,
+            Status = TransactionStatus.Completed,
+            Description = incomingTransfer.Description,
+            ReferenceId = incomingTransfer.Id.ToString(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task ProcessWebhookAsync(Guid transferId, string status, string? referenceId, CancellationToken ct = default)

@@ -14,6 +14,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<BlikAuthorization> BlikAuthorizations => Set<BlikAuthorization>();
     public DbSet<JuniorAccount> JuniorAccounts => Set<JuniorAccount>();
     public DbSet<PhoneAlias> PhoneAliases => Set<PhoneAlias>();
+    public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -144,6 +145,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(p => new { p.Phone, p.Status });
             e.HasIndex(p => p.AccountId);
+        });
+
+        modelBuilder.Entity<ExchangeRate>(e =>
+        {
+            e.HasKey(r => r.CurrencyCode);
+            e.Property(r => r.CurrencyCode).HasMaxLength(3);
+            e.Property(r => r.RateToUsd).HasPrecision(18, 6);
         });
     }
 }
