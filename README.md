@@ -156,6 +156,22 @@ Klient rejestruje numer telefonu jako alias swojego konta w systemie KLIK. Inni 
 4. Jeśli odbiorca jest w tym samym banku (routing number match) → przelew wewnętrzny (natychmiastowy)
 5. Jeśli odbiorca jest w innym banku → przelew zewnętrzny przez FedNow z rezerwacją salda
 
+#### P2P off-us — odbiorca w innym banku
+
+Gdy lookup aliasu w KLIK (`GET /api/v1/aliases/lookup/{phone}`) zwraca routing number innego banku niż nasz, przelew jest realizowany asynchronicznie przez kanał FedNow:
+
+1. Bank rezerwuje saldo na koncie nadawcy
+2. Buduje komunikat pacs.008 z danymi odbiorcy z KLIK i wysyła go do FedSystems MQ
+3. Transfer otrzymuje status `Pending`
+4. FedNowPollingService odpytuje MQ o pacs.002 od banku odbiorcy
+5. pacs.002 ACCP → status `Completed`, saldo finalnie obciążone
+6. pacs.002 RJCT → status `Rejected`, rezerwacja zwolniona
+
+**Wymagania:**
+- Aktywna integracja FedNow (patrz sekcja [FedNow](#fednow-rtgs-via-fedsystems))
+- `p2p_enabled=True` dla naszego banku w panelu administracyjnym KLIK
+- Klucz API KLIK skonfigurowany w `docker-compose.override.yml` jako `Integrations__KlikApiKey`
+
 #### Ograniczenia funkcji BLIK
 - Konto junior nie ma dostępu do BLIK ani do P2P
 - Jedno aktywne konto może mieć max 1 aktywny alias telefoniczny
