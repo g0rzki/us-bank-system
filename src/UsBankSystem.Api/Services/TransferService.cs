@@ -23,7 +23,7 @@ public class TransferService(
     {
         return await db.Transfers
             .Include(t => t.FromAccount)
-            .Where(t => t.FromAccount.UserId == userId || db.Accounts.Any(a => a.Id == t.ToAccountId && a.UserId == userId))
+            .Where(t => t.FromAccount!.UserId == userId || db.Accounts.Any(a => a.Id == t.ToAccountId && a.UserId == userId))
             .OrderByDescending(t => t.CreatedAt)
             .Select(t => new TransferResponse
             {
@@ -50,7 +50,7 @@ public class TransferService(
         var transfer = await db.Transfers
             .Include(t => t.FromAccount)
             .FirstOrDefaultAsync(t => t.Id == transferId
-                && (t.FromAccount.UserId == userId
+                && (t.FromAccount!.UserId == userId
                     || db.Accounts.Any(a => a.Id == t.ToAccountId && a.UserId == userId)
                     || db.JuniorAccounts.Any(j => j.AccountId == t.FromAccountId && j.ParentUserId == userId)))
             ?? throw new KeyNotFoundException("Transfer not found");
@@ -102,6 +102,9 @@ public class TransferService(
         var isParent = await db.JuniorAccounts.AnyAsync(j => j.AccountId == transfer.FromAccountId && j.ParentUserId == userId);
         if (!isParent)
             throw new UnauthorizedAccessException("Access denied");
+
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transferId} has no source account");
 
         var availableBalance = transfer.FromAccount.Balance - transfer.FromAccount.ReservedBalance;
         if (availableBalance < transfer.Amount)
@@ -175,6 +178,9 @@ public class TransferService(
         if (!isParent)
             throw new UnauthorizedAccessException("Access denied");
 
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transferId} has no source account");
+
         transfer.FromAccount.ReservedBalance -= transfer.Amount;
         transfer.Status = TransferStatus.Rejected;
         transfer.RejectedAt = DateTime.UtcNow;
@@ -193,6 +199,9 @@ public class TransferService(
 
         if (transfer.Status != TransferStatus.Pending)
             throw new ArgumentException("Transfer is not in pending state");
+
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transferId} has no source account");
 
         if (status == TransferStatus.Completed)
         {
@@ -268,6 +277,9 @@ public class TransferService(
 
     private async Task<TransferResponse> ApproveFedNowAsync(Transfer transfer, Guid userId)
     {
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transfer.Id} has no source account");
+
         var config = paymentConfig.Value.FedNow;
 
         transfer.ApprovedBy = userId;
