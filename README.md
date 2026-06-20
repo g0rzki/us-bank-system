@@ -61,8 +61,47 @@ ACH to sieć rozliczeniowa obsługiwana przez **NACHA** (National Automated Clea
 ### RTP (Real-Time Payments)
 > 📝 TODO (US-57) — opis mechanizmu, rozliczenie natychmiastowe 24/7, rola The Clearing House
 
-### FedNow
-> 📝 TODO (US-57) — opis mechanizmu RTGS, rola Fed Reserve, różnica vs RTP
+### FedNow (RTGS via FedSystems)
+
+FedNow to system przelewów RTGS (Real-Time Gross Settlement) operowany przez Federal Reserve. W odróżnieniu od RTP (The Clearing House), rozliczenie odbywa się bezpośrednio przez bank centralny. System obsługuje przelewy wychodzące (pacs.008), przychodzące (pacs.008 od innego banku) oraz request-to-pay (pain.013 inicjowany przez KLIK).
+
+Komunikacja z FedSystems odbywa się przez kolejkę komunikatów (HTTP MQ gateway) — bank wysyła komunikaty ISO 20022 XML na endpoint `/send` i odpytuje `/FIFO/out` o przychodzące wiadomości.
+
+**Konfiguracja lokalna:**
+
+Wymagania:
+- Projekt `payment-settlement-systems/FedSystems` sklonowany jako katalog siostrzany (obok `us-bank-system/`)
+- Skonfigurowany bank testowy z RTN przechodzącym walidację MOD-10
+- Colima (lub Docker Desktop) uruchomiona
+
+Zmienne środowiskowe (przez `docker-compose.override.yml`, gitignorowany):
+
+| Zmienna | Opis | Przykład |
+|---|---|---|
+| `Integrations__FedNowMqUrl` | URL MQ gateway FedSystems | `http://host.docker.internal:8770` |
+| `FedNow__BankRtn` | RTN banku (9 cyfr, MOD-10) | `040104018` |
+| `FedNow__BankLegalName` | Nazwa prawna banku | `Baguette Bank` |
+| `FedNow__PollIntervalSeconds` | Interwał pollingu (domyślnie 1) | `1` |
+
+Jak postawić FedSystems:
+```bash
+cd ../payment-settlement-systems/FedSystems
+docker compose up
+```
+Panel administracyjny FedSystems dostępny pod `:3310`.
+
+**Obsługiwane przepływy:**
+
+- **Przelew wychodzący:** `POST /transfers/fednow` → status `Pending` → pacs.008 wysłany do MQ → polling pacs.002 → `Completed` (ACCP) / `Rejected` (RJCT) / `Failed` (BLCK)
+- **Przelew przychodzący:** polling `/FIFO/out` → parse pacs.008 → walidacja RTN → zaksięgowanie kredytu na koncie odbiorcy → pacs.002 ACCP odesłany do MQ
+- **Request-to-pay (pain.013 od KLIK):** polling pain.013 → walidacja konta i salda → rezerwacja środków → pain.014 ACCP (potwierdzenie odbioru żądania) → pacs.008 (inicjacja przelewu) → finalizacja przez pacs.002
+- **Zatwierdzanie juniorskich przelewów FedNow:** po akceptacji przez rodzica (`POST /transfers/{id}/approve`) → budowa i wysłanie pacs.008 → status `Pending` → finalizacja przez pacs.002
+
+**Znane ograniczenia:**
+
+- Pełny test pacs.008→pacs.002→Completed wymaga drugiej bank-app po stronie odbiorcy z auto-response pipeline. Dodatkowo, zidentyfikowano błąd w logice dopasowania wiadomości pacs.002 po stronie FedSystems, który może uniemożliwić finalizację cyklu gdy w systemie jest więcej niż jedna wiadomość pending jednocześnie — zgłoszone do zespołu FedSystems.
+- CreditorBankName zawsze "Unknown Bank" — brak lookupa RTN→nazwa w systemie.
+- Settlement T+{czas} nie jest implementowany — transfer przechodzi w Completed po pacs.002 ACCP, bez mechanizmu opóźnionego rozliczenia.
 
 ### SWIFT
 > 📝 TODO (US-57) — opis sieci korespondentów, IBAN, BIC, SWIFT gpi
@@ -202,14 +241,47 @@ flowchart TD
 
 ### Przepływ przelewu FedNow (BPMN)
 
-> 📝 TODO (US-53) — diagram przepływu: inicjacja → walidacja → RTGS → settlement natychmiastowy
+**Przelew wychodzący:**
 
 ```mermaid
-%% TODO (US-53): Uzupełnić diagram BPMN przepływu FedNow
-flowchart LR
-    A[Inicjacja FedNow] --> B[Walidacja]
-    B --> C[RTGS Fed Reserve]
-    C --> D[Settlement natychmiastowy]
+flowchart TD
+    U([Użytkownik]) -->|POST /transfers/fednow| SVC[FedNowPaymentService]
+    SVC -->|1. Walidacja + rezerwacja salda| DB[(PostgreSQL)]
+    SVC -->|2. Transfer status Pending| DB
+    SVC -->|3. Budowa pacs.008 XML| B[Pacs008Builder]
+    B --> MQ[FedNow MQ Gateway]
+    MQ -->|4. POST /send| FS[FedSystems MQ :8770]
+    FS -->|5. pacs.002 ACCP/RJCT| POLL[FedNowPollingService]
+    POLL -->|co 1s GET /FIFO/out| FS
+    POLL -->|6. Aktualizacja statusu| DB
+```
+
+**Przelew przychodzący (pacs.008 od innego banku):**
+
+```mermaid
+flowchart TD
+    FS[FedSystems MQ] -->|pacs.008| POLL[FedNowPollingService]
+    POLL -->|co 1s GET /FIFO/out| FS
+    POLL -->|1. Parse pacs.008| P[Pacs008Parser]
+    P -->|2. Walidacja RTN odbiorcy| POLL
+    POLL -->|3. Kredyt na koncie| DB[(PostgreSQL)]
+    POLL -->|4. Transfer Completed| DB
+    POLL -->|5. pacs.002 ACCP| MQ[POST /send → MQ]
+```
+
+**Request-to-pay (pain.013 od KLIK):**
+
+```mermaid
+flowchart TD
+    FS[FedSystems MQ] -->|pain.013| POLL[FedNowPollingService]
+    POLL -->|1. Parse pain.013| P[Pain013Parser]
+    P -->|2. Walidacja konta + salda| POLL
+    POLL -->|3. Rezerwacja salda, Transfer Pending| DB[(PostgreSQL)]
+    POLL -->|4. pain.014 ACCP| MQ1[POST /send → MQ]
+    POLL -->|5. Budowa pacs.008| B[Pacs008Builder]
+    B -->|6. pacs.008| MQ2[POST /send → MQ]
+    FS -->|7. pacs.002 ACCP| POLL
+    POLL -->|8. Transfer Completed| DB
 ```
 
 ### Przepływ KLIK C2B (BPMN)
