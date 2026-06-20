@@ -178,10 +178,9 @@ Gdy lookup aliasu w KLIK (`GET /api/v1/aliases/lookup/{phone}`) zwraca routing n
 
 #### Znane ograniczenia
 
-> **P2P off-us (FedNow, odbiorca w innym banku KLIK) nie był zweryfikowany end-to-end na żywo
-> z drugim bankiem.** W środowisku testowym był zarejestrowany tylko jeden bank. Logika jest
-> pokryta testami jednostkowymi z zamockowanym klientem KLIK P2P, ale nie testem integracyjnym
-> live. Do pełnej weryfikacji wymagany jest drugi bank zarejestrowany w instancji KLIK.
+P2P off-us (FedNow) został zweryfikowany end-to-end na żywo z drugim bankiem (Leek Bank,
+RTN 010101012) zarejestrowanym w instancji KLIK. Scenariusz obejmował lookup aliasu, routing
+pacs.008 przez FedSystems, dostarczenie do MQ drugiego banku oraz pacs.002 ACCP z powrotem.
 
 #### Konfiguracja KLIK
 
