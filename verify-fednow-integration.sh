@@ -10,7 +10,7 @@
 # Reads credentials from .env in the same directory.
 # Requires: curl, python3
 
-set -uo pipefail
+set -euo pipefail
 cd "$(dirname "$0")"
 
 # ── load .env ──────────────────────────────────────────────────────────────────
@@ -32,11 +32,11 @@ ok=0; fail=0; total=0
 
 check() {
   local desc="$1" got="$2" want="$3"
-  ((total++))
+  total=$((total+1))
   if echo "$got" | grep -qi "$want"; then
-    printf "  \033[32mPASS\033[0m  %s\n" "$desc"; ((ok++))
+    printf "  \033[32mPASS\033[0m  %s\n" "$desc"; ok=$((ok+1))
   else
-    printf "  \033[31mFAIL\033[0m  %s\n         got:  %s\n         want: %s\n" "$desc" "$got" "$want"; ((fail++))
+    printf "  \033[31mFAIL\033[0m  %s\n         got:  %s\n         want: %s\n" "$desc" "$got" "$want"; fail=$((fail+1))
   fi
 }
 
