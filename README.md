@@ -59,7 +59,48 @@ ACH to sieć rozliczeniowa obsługiwana przez **NACHA** (National Automated Clea
 - Debety przychodzące (`27`/`28`/`37`/`38`) logowane jako `LogWarning`, ale nie są księgowane — wymagają osobnej obsługi.
 
 ### RTP (Real-Time Payments)
-> 📝 TODO (US-57) — opis mechanizmu, rozliczenie natychmiastowe 24/7, rola The Clearing House
+
+RTP to sieć przelewów natychmiastowych operowana przez **The Clearing House** (TCH) — prywatną instytucję rozliczeniową należącą do największych banków amerykańskich. W odróżnieniu od FedNow (bank centralny), RTP działa jako **credit push only** — nadawca inicjuje przelew, odbiorca nie może żądać środków. System działa **24/7/365** z rozliczeniem w czasie rzeczywistym.
+
+**Mechanizm w tym projekcie:**
+- `RtpTchGateway` komunikuje się z **TCHSystems** przez HTTP REST API z payloadami ISO 20022 XML (pacs.008 / pacs.002)
+- Uwierzytelnienie przez nagłówek `X-Api-Key` w każdym żądaniu
+- `RtpPollingService` (BackgroundService) odpytuje kolejkę przychodzących wiadomości (`GET /queue/incoming`) co 2 sekundy
+- Przelewy wychodzące wysyłane na `POST /transfers`, odpowiedzi (pacs.002) na `POST /transfers/settle`
+
+**Konfiguracja lokalna:**
+
+Wymagania:
+- Projekt `payment-settlement-systems/TCHSystems` sklonowany i uruchomiony (port 8200)
+- Klucz API TCH (`Rtp__ApiKey`) i kod banku (`Rtp__BankCode`) skonfigurowane
+
+Zmienne środowiskowe (`.env` lub `docker-compose.override.yml`):
+
+| Zmienna | Opis | Przykład |
+|---|---|---|
+| `TCHSYSTEMS_RTP_URL` | URL instancji TCHSystems (odczytywany jako `Integrations:RtpTchUrl`) | `http://localhost:8200` |
+| `Rtp__ApiKey` | Klucz API do nagłówka X-Api-Key | `changeme_rtp_api_key` |
+| `Rtp__BankCode` | Identyfikator banku w komunikatach pacs.008 (pole `nm`) | `baguette-bank` |
+| `Rtp__BankRtn` | RTN banku (9 cyfr) | `040104018` |
+
+Jak postawić TCHSystems:
+```bash
+cd ../payment-settlement-systems/TCHSystems
+docker compose up
+```
+
+**Obsługiwane przepływy:**
+
+- **Przelew wychodzący (external):** `POST /transfers/rtp` z `toRoutingNumber` → status `Pending` → pacs.008 wysłany do TCH (`POST /transfers`) → polling pacs.002 z kolejki → `Completed` (ACCP) / `Rejected` (RJCT). Pole `ToBankCode` trafia do `CdtrAgt/FinInstnId/ClrSysMmbId/nm` w pacs.008 — jeśli nie podane, fallback na `ToRoutingNumber`.
+- **Przelew wychodzący (internal):** `POST /transfers/rtp` bez `toRoutingNumber` → wewnętrzny przelew natychmiastowy przez mock RTP gateway
+- **Przelew przychodzący:** polling `GET /queue/incoming` → parse pacs.008 → walidacja konta odbiorcy → kredyt na koncie → pacs.002 ACCP odesłany przez `POST /transfers/settle`. Duplikaty (po `EndToEndId`) ignorowane.
+- **RJCT przychodzącego:** jeśli konto odbiorcy nie istnieje lub jest nieaktywne → pacs.002 RJCT odesłany do TCH
+- **Zatwierdzanie juniorskich przelewów RTP:** po akceptacji przez rodzica → budowa i wysłanie pacs.008 → status `Pending` → finalizacja przez pacs.002
+
+**Znane ograniczenia:**
+
+- Settlement natychmiastowy — przychodzące przelewy oznaczane jako `Completed` od razu po zaksięgowaniu, bez mechanizmu opóźnionego rozliczenia.
+- Brak strategii backoff przy niedostępności TCH — polling kontynuuje z tym samym interwałem.
 
 ### FedNow (RTGS via FedSystems)
 
@@ -245,10 +286,9 @@ Gdy lookup aliasu w KLIK (`GET /api/v1/aliases/lookup/{phone}`) zwraca routing n
 
 #### Znane ograniczenia
 
-> **P2P off-us (FedNow, odbiorca w innym banku KLIK) nie był zweryfikowany end-to-end na żywo
-> z drugim bankiem.** W środowisku testowym był zarejestrowany tylko jeden bank. Logika jest
-> pokryta testami jednostkowymi z zamockowanym klientem KLIK P2P, ale nie testem integracyjnym
-> live. Do pełnej weryfikacji wymagany jest drugi bank zarejestrowany w instancji KLIK.
+P2P off-us (FedNow) został zweryfikowany end-to-end na żywo z drugim bankiem (Leek Bank,
+RTN 010101012) zarejestrowanym w instancji KLIK. Scenariusz obejmował lookup aliasu, routing
+pacs.008 przez FedSystems, dostarczenie do MQ drugiego banku oraz pacs.002 ACCP z powrotem.
 
 #### Konfiguracja KLIK
 
@@ -379,6 +419,148 @@ flowchart LR
     G --> H[KLIK payments/confirm]
     H --> I[Debit konta / REJECTED]
 ```
+
+### Przepływ przelewu RTP (BPMN)
+
+**Przelew wychodzący:**
+
+```mermaid
+flowchart TD
+    U([Użytkownik]) -->|POST /transfers/rtp| SVC[RtpPaymentService]
+    SVC -->|1. Walidacja + rezerwacja salda| DB[(PostgreSQL)]
+    SVC -->|2. Transfer status Pending| DB
+    SVC -->|3. Budowa pacs.008 XML| B[Pacs008Builder]
+    B --> GW[RtpTchGateway]
+    GW -->|4. POST /transfers X-Api-Key| TCH[TCHSystems :8200]
+    TCH -->|5. pacs.002 w kolejce| POLL[RtpPollingService]
+    POLL -->|co 2s GET /queue/incoming| TCH
+    POLL -->|6. Aktualizacja statusu| DB
+```
+
+**Legenda kroków:**
+1. `RtpPaymentService` blokuje saldo na koncie nadawcy (`ReservedBalance += amount`)
+2. Transfer zapisywany z `Status = Pending`, `ExternalReferenceId = E2E-{TransferId}`
+3. `Pacs008Builder.Build()` tworzy komunikat ISO 20022 — `CdtrAgt/nm` ustawione na `ToBankCode` (identyfikator banku, nie RTN)
+4. XML wysyłany do TCHSystems z uwierzytelnieniem `X-Api-Key` w nagłówku
+5. TCH zwraca pacs.002 do kolejki przychodzących — polling co 2 sekundy
+6. Status transferu aktualizowany: ACCP → `Completed` (saldo obciążone), RJCT → `Rejected` (rezerwacja zwolniona)
+
+**Przelew przychodzący (pacs.008 od innego banku):**
+
+```mermaid
+flowchart TD
+    TCH[TCHSystems] -->|pacs.008| POLL[RtpPollingService]
+    POLL -->|co 2s GET /queue/incoming| TCH
+    POLL -->|1. Parse pacs.008| P[Pacs008Parser]
+    P -->|2. Walidacja konta odbiorcy| POLL
+    POLL -->|3. Kredyt na koncie| DB[(PostgreSQL)]
+    POLL -->|4. Transfer Completed| DB
+    POLL -->|5. pacs.002 ACCP| GW[POST /transfers/settle → TCH]
+```
+
+**Legenda kroków:**
+1. `Pacs008Parser.Parse()` wyciąga dane nadawcy, odbiorcy, kwotę, walutę i `EndToEndId`
+2. Sprawdzenie duplikatu (`EndToEndId`), walidacja istnienia konta odbiorcy i statusu `active`
+3. Saldo konta odbiorcy zwiększone o kwotę przelewu
+4. Transfer zapisany z `Status = Completed`, transakcja typu `Credit` dodana do historii
+5. `Pacs002Builder.Build()` tworzy odpowiedź ACCP (lub RJCT jeśli konto nie istnieje) i wysyła przez `POST /transfers/settle`
+
+### Przepływ karty płatniczej (BPMN)
+
+**Wydanie karty i płatność (debit):**
+
+```mermaid
+flowchart TD
+    U([Użytkownik]) -->|POST /accounts/id/cards| SVC[CardService]
+    SVC -->|1. IssueCardAsync HMAC-SHA256| GW[Payment-Gateway]
+    GW -->|token + masked PAN| SVC
+    SVC -->|2. Zapis karty| DB[(PostgreSQL)]
+    GW -->|3. Auto-aktywacja ~60s| GW
+    POS([Terminal POS]) -->|4. Autoryzacja| GW
+    GW -->|APPROVED / DECLINED| POS
+    GW -->|5. POST /capture settlement| CAPT[CaptureController]
+    CAPT -->|6. Balance -= amount| DB
+    CAPT -->|7. Transakcja debit| DB
+```
+
+**Legenda kroków:**
+1. `CardsGateway.IssueCardAsync()` — karta rejestrowana jako `VIRTUAL` w payment-gateway, żądanie podpisane HMAC-SHA256
+2. Token karty (`tok_...`), zamaskowany PAN i data ważności zapisane w bazie
+3. Karta debitowa aktywuje się automatycznie w payment-gateway w ciągu ~60 sekund
+4. Terminal POS autoryzuje płatność bezpośrednio w payment-gateway — bank nie uczestniczy w autoryzacji
+5. Card-provider wysyła settlement webhook `POST /capture` po max 30s (dev) / 24h (prod)
+6. **Karta debit:** saldo konta bankowego pomniejszone o kwotę transakcji (`Account.Balance -= amount`)
+7. Transakcja typu `debit` ze statusem `completed` zapisana w historii konta
+
+**Płatność kartą prepaid — różnica:**
+
+```mermaid
+flowchart TD
+    U([Użytkownik]) -->|POST /accounts/id/cards type=prepaid| SVC[CardService]
+    SVC -->|1. IssueCardAsync PREPAID| GW[Payment-Gateway]
+    SVC -->|2. Lifecycle REQUESTED→ACTIVE| GW
+    U -->|3. POST topup| SVC
+    SVC -->|4. Zasilenie salda prepaid| GW
+    POS([Terminal POS]) -->|5. Autoryzacja z salda prepaid| GW
+    GW -->|6. POST /capture| CAPT[CaptureController]
+    CAPT -->|7. Transakcja w historii, saldo konta bez zmian| DB[(PostgreSQL)]
+```
+
+**Legenda kroków:**
+1. Karta rejestrowana jako `PREPAID` w payment-gateway — saldo początkowe 0
+2. `ActivatePrepaidInBackgroundAsync` przeprowadza kartę przez lifecycle: `REQUESTED → PRODUCING → SHIPPED → ACTIVE`
+3. Rodzic (lub właściciel) zasila kartę prepaid przez `POST /accounts/{id}/cards/{cardId}/topup`
+4. Środki trafiają na saldo karty w payment-gateway (nie na konto bankowe)
+5. Autoryzacja płatności sprawdza saldo prepaid w payment-gateway — konto bankowe nie jest obciążane
+6. Settlement webhook `POST /capture` po autoryzacji
+7. **Karta prepaid:** transakcja zapisana w historii konta, ale `Account.Balance` **nie jest zmniejszane** — środki zostały już odjęte z salda prepaid w momencie autoryzacji
+
+### Przepływ BLIK P2P on-us (BPMN)
+
+```mermaid
+flowchart TD
+    U([Użytkownik]) -->|POST /transfers/p2p| P2P[P2pController]
+    P2P -->|1. Lookup aliasu| KLIK[KLIK API]
+    KLIK -->|routing_number + account| P2P
+    P2P -->|2. Routing number = nasz?| DEC{On-us?}
+    DEC -->|Tak| INT[InternalPaymentService]
+    INT -->|3. Debit nadawcy| DB[(PostgreSQL)]
+    INT -->|4. Credit odbiorcy| DB
+    INT -->|5. Transfer Completed natychmiast| DB
+```
+
+**Legenda kroków:**
+1. `KlikP2pClient.LookupAliasAsync(phone)` — odpytanie KLIK o routing number i numer konta przypisany do numeru telefonu
+2. Porównanie `lookup.RoutingNumber` z własnym RTN banku — jeśli się zgadza, przelew wewnętrzny
+3. Saldo konta nadawcy pomniejszone o kwotę (`Balance -= amount`)
+4. Saldo konta odbiorcy zwiększone o kwotę (`Balance += amount`)
+5. Transfer zapisany ze statusem `Completed`, transakcje debit/credit dodane do historii — całość natychmiastowa
+
+### Przepływ BLIK P2P off-us przez FedNow (BPMN)
+
+```mermaid
+flowchart TD
+    U([Użytkownik]) -->|POST /transfers/p2p| P2P[P2pController]
+    P2P -->|1. Lookup aliasu| KLIK[KLIK API]
+    KLIK -->|routing_number ≠ nasz| P2P
+    P2P -->|2. Rezerwacja salda| DB[(PostgreSQL)]
+    P2P -->|3. Transfer Pending| DB
+    P2P -->|4. Budowa pacs.008| B[Pacs008Builder]
+    B -->|dane odbiorcy z KLIK| MQ[FedNow MQ Gateway]
+    MQ -->|5. POST /send| FS[FedSystems MQ :8770]
+    FS -->|6. pacs.002 ACCP/RJCT| POLL[FedNowPollingService]
+    POLL -->|co 1s GET /FIFO/out| FS
+    POLL -->|7. Aktualizacja statusu| DB
+```
+
+**Legenda kroków:**
+1. `KlikP2pClient.LookupAliasAsync(phone)` — KLIK zwraca routing number i numer konta odbiorcy w innym banku
+2. Saldo nadawcy zablokowane (`ReservedBalance += amount`)
+3. Transfer zapisany ze statusem `Pending`
+4. `Pacs008Builder.Build()` — komunikat ISO 20022 z danymi z lookupu KLIK: `CreditorBankRtn` = routing number, `CreditorAccountNumber` = numer konta. `CreditorBankName` ustawiane jako `"Unknown Bank"` (KLIK nie zwraca nazwy banku — brak lookupa RTN→nazwa, analogicznie jak w FedNow)
+5. Komunikat wysłany do FedSystems MQ — FedSystems doręcza go do banku odbiorcy
+6. Bank odbiorcy przetwarza przelew i odsyła pacs.002 (ACCP = przyjęty, RJCT = odrzucony)
+7. ACCP → `Completed`, saldo finalnie obciążone; RJCT → `Rejected`, rezerwacja zwolniona
 
 ### Przepływ zatwierdzania transakcji junior (BPMN)
 
@@ -840,6 +1022,20 @@ Pokrywa 25 przypadków brzegowych:
 | Capture webhook | Nieznany token → 200 SETTLED, kwota ujemna → 400 |
 | POS | Zablokowana karta → DECLINED, zły CVV → DECLINED, błędny PAN (Luhn) → 422 |
 | No-auth | Brak tokenu JWT → 401 |
+
+### Skrypty weryfikacyjne integracji
+
+Pięć skryptów do weryfikacji łączności z systemami partnerskimi. Każdy wymaga `.env` z odpowiednimi sekretami. Bezpieczne do wielokrotnego uruchamiania.
+
+| Skrypt | Co sprawdza | System partnerski | Uwagi |
+|---|---|---|---|
+| `verify-cards-integration.sh` | Łączność z payment-gateway, podpis HMAC, sieć Docker, webhook `/capture` | Karty-Platnicze (Filip) | Przy pierwszym uruchomieniu tworzy testową kartę prepaid (kolejne: idempotentne 409) |
+| `verify-ach-integration.sh` | Łączność SFTP z FedSystems, wymiana plików, helper ACH | FedSystems ACH (VanillaMile) | Read-only — nie tworzy przelewów |
+| `verify-fednow-integration.sh` | Łączność z MQ FedSystems, rejestracja banku w FedNow Central | FedSystems FedNow (VanillaMile) | Read-only — nie wysyła komunikatów |
+| `verify-rtp-integration.sh` | Łączność z TCHSystems, walidacja X-Api-Key (poprawny + celowo błędny) | TCHSystems RTP (VanillaMile) | Read-only — nie tworzy przelewów |
+| `verify-blik-integration.sh` | Health check KLIK, walidacja API key, dostępność webhooka `/klik/webhook/ping` | KLIK P2P (MarshallBjorn) | Read-only — lookup z dummy phone (+00000000000 → oczekiwane 404) |
+
+System przeszedł pełną rundę testów end-to-end łączącą wszystkie integracje w jednym scenariuszu klienta (FedNow przychodzący → karta → BLIK P2P → ACH wychodzący → weryfikacja salda).
 
 ---
 
