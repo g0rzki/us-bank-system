@@ -53,7 +53,7 @@ public class Pain013HandlingTests
         Options.Create(new PaymentSessionConfig
         {
             Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
-            Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
+            Rtp = new RtpConfig { TimeoutSeconds = 10 },
             FedNow = new FedNowConfig { TimeoutSeconds = 10, PollIntervalSeconds = 1, BankRtn = "040104018", BankLegalName = "Baguette Bank" },
             Swift = new SwiftConfig { TimeoutSeconds = 10 }
         });

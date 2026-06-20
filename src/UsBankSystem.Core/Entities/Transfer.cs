@@ -12,6 +12,7 @@ public class Transfer
     public string Status { get; set; } = "pending"; // pending | pending_approval | completed | failed | rejected
     public string? ExternalReferenceId { get; set; }
     public string? ToRoutingNumber { get; set; }
+    public string? ToBankCode { get; set; }
     public string? RecipientName { get; set; }
     public string? Description { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

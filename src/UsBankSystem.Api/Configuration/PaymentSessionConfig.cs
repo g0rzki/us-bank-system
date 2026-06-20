@@ -4,7 +4,7 @@ public class PaymentSessionConfig
 {
     public AchConfig Ach { get; set; } = new();
     public FedNowConfig FedNow { get; set; } = new();
-    public TimeoutConfig Rtp { get; set; } = new();
+    public RtpConfig Rtp { get; set; } = new();
     public SwiftConfig Swift { get; set; } = new();
 }
 
@@ -17,6 +17,15 @@ public class AchConfig
 public class TimeoutConfig
 {
     public int TimeoutSeconds { get; set; } = 20;
+}
+
+public class RtpConfig
+{
+    public int TimeoutSeconds { get; set; } = 20;
+    public int PollIntervalSeconds { get; set; } = 2;
+    public string BankCode { get; set; } = "baguette-bank";
+    public string BankRtn { get; set; } = "040104018";
+    public string BankLegalName { get; set; } = "Baguette Bank";
 }
 
 public class FedNowConfig

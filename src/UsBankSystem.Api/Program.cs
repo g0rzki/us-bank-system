@@ -6,6 +6,7 @@ using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Extensions;
 using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Integrations.FedNow;
+using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Integrations.Sftp;
 using UsBankSystem.Api.Middleware;
 using UsBankSystem.Api.Services;
@@ -57,6 +58,9 @@ builder.Services.AddSingleton<Pacs002Builder>();
 builder.Services.AddSingleton<Pain013Parser>();
 builder.Services.AddSingleton<Pain014Builder>();
 builder.Services.AddHostedService<FedNowPollingService>();
+builder.Services.AddHttpClient<RtpTchGateway>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpTchUrl"] ?? "http://localhost:8200"));
+builder.Services.AddHostedService<RtpPollingService>();
 builder.Services.AddHttpClient<SwiftGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:SwiftUrl"] ?? "http://localhost:6004"));
 builder.Services.AddHttpClient<CardsGateway>(c =>

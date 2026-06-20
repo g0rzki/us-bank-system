@@ -10,6 +10,7 @@ using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Integrations.FedNow;
+using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
 using UsBankSystem.Api.Services.Payments;
@@ -41,12 +42,18 @@ public class ApproveRejectTransferTests
         Options.Create(new PaymentSessionConfig
         {
             Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
-            Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
+            Rtp = new RtpConfig { TimeoutSeconds = 10 },
             FedNow = new FedNowConfig { TimeoutSeconds = 10, PollIntervalSeconds = 1, BankRtn = "040104018", BankLegalName = "Baguette Bank" },
             Swift = new SwiftConfig { TimeoutSeconds = 10 }
         });
 
-    private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode mqStatus = HttpStatusCode.OK)
+    private static RtpTchGateway CreateRtpTchGateway(HttpStatusCode statusCode = HttpStatusCode.OK) =>
+        new(new HttpClient(new MockHttpMessageHandler(statusCode, "<xml/>"))
+            { BaseAddress = new Uri("http://localhost:8200") },
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        NullLogger<RtpTchGateway>.Instance);
+
+    private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode mqStatus = HttpStatusCode.OK, HttpStatusCode rtpTchStatus = HttpStatusCode.OK)
     {
         var achGateway = AchTestHelpers.CreateGateway();
         var rtpGateway = new RtpGateway(
@@ -61,13 +68,14 @@ public class ApproveRejectTransferTests
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6004") },
             NullLogger<SwiftGateway>.Instance);
+        var rtpTchGateway = CreateRtpTchGateway(rtpTchStatus);
 
         var internalPayment = new InternalPaymentService(db);
         var achPayment = new AchPaymentService(db, achGateway, CreatePaymentConfig());
-        var rtpPayment = new RtpPaymentService(db, rtpGateway, CreatePaymentConfig());
+        var rtpPayment = new RtpPaymentService(db, rtpGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
         var fedNowPayment = new FedNowPaymentService(db, mqGateway, new Pacs008Builder(), CreatePaymentConfig());
         var swiftPayment = new SwiftPaymentService(db, swiftGateway, CreatePaymentConfig());
-        var transferService = new TransferService(db, mqGateway, new Pacs008Builder(), CreatePaymentConfig());
+        var transferService = new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
         var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {
@@ -303,6 +311,83 @@ public class ApproveRejectTransferTests
     {
         var (db, parentUserId, juniorAccountId, transferId) = await SetupFedNow();
         var controller = CreateController(db, parentUserId, HttpStatusCode.InternalServerError);
+
+        var result = await controller.Approve(transferId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<TransferResponse>(ok.Value);
+        Assert.Equal(TransferStatus.Failed, response.Status);
+
+        var junior = await db.Accounts.FindAsync(juniorAccountId);
+        Assert.Equal(100m, junior!.Balance);
+        Assert.Equal(0m, junior.ReservedBalance);
+    }
+
+    // --- RTP External Approval Tests ---
+
+    private async Task<(AppDbContext db, Guid parentUserId, Guid juniorAccountId, Guid transferId)> SetupRtpExternal()
+    {
+        var db = CreateDb();
+
+        var parentUser = new User { Id = Guid.NewGuid(), Email = "parent@example.com", PasswordHash = "hash", FirstName = "Parent", LastName = "User", Status = "active", CreatedAt = DateTime.UtcNow };
+        db.Users.Add(parentUser);
+
+        var juniorAccount = new Account { Id = Guid.NewGuid(), UserId = parentUser.Id, AccountNumber = "2000000001", Type = "checking", Balance = 100m, ReservedBalance = 30m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow };
+        db.Accounts.Add(juniorAccount);
+
+        db.JuniorAccounts.Add(new JuniorAccount { Id = Guid.NewGuid(), AccountId = juniorAccount.Id, ParentUserId = parentUser.Id, DateOfBirth = new DateOnly(2015, 6, 15), CreatedAt = DateTime.UtcNow });
+
+        var transfer = new Transfer
+        {
+            Id = Guid.NewGuid(),
+            FromAccountId = juniorAccount.Id,
+            ToAccountId = null,
+            ToAccountNumber = "333999333999",
+            ToRoutingNumber = "010101012",
+            RecipientName = "Miku",
+            Amount = 30m,
+            Currency = "USD",
+            Channel = TransferChannel.Rtp,
+            Status = TransferStatus.PendingApproval,
+            RequiresApproval = true,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.Transfers.Add(transfer);
+
+        await db.SaveChangesAsync();
+        return (db, parentUser.Id, juniorAccount.Id, transfer.Id);
+    }
+
+    [Fact]
+    public async Task Approve_RtpExternal_SetsPendingAndSendsPacs008()
+    {
+        var (db, parentUserId, juniorAccountId, transferId) = await SetupRtpExternal();
+        var controller = CreateController(db, parentUserId);
+
+        var result = await controller.Approve(transferId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<TransferResponse>(ok.Value);
+        Assert.Equal(TransferStatus.Pending, response.Status);
+
+        var transfer = await db.Transfers.FindAsync(transferId);
+        Assert.NotNull(transfer!.ExternalReferenceId);
+        Assert.StartsWith("E2E-", transfer.ExternalReferenceId);
+        Assert.Equal(parentUserId, transfer.ApprovedBy);
+        Assert.NotNull(transfer.ApprovedAt);
+
+        var junior = await db.Accounts.FindAsync(juniorAccountId);
+        Assert.Equal(100m, junior!.Balance);
+        Assert.Equal(30m, junior.ReservedBalance);
+
+        Assert.Equal(0, await db.Transactions.CountAsync());
+    }
+
+    [Fact]
+    public async Task Approve_RtpExternal_GatewayFails_SetsFailedAndReleasesReserve()
+    {
+        var (db, parentUserId, juniorAccountId, transferId) = await SetupRtpExternal();
+        var controller = CreateController(db, parentUserId, rtpTchStatus: HttpStatusCode.InternalServerError);
 
         var result = await controller.Approve(transferId);
 

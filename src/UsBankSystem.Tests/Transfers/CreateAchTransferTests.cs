@@ -10,6 +10,7 @@ using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Integrations.FedNow;
+using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Models.Auth;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
@@ -39,7 +40,7 @@ public class CreateAchTransferTests
         Options.Create(new PaymentSessionConfig
         {
             Ach = new AchConfig { BatchWindowMinutes = 1, CutoffHour = 23 },
-			Rtp = new TimeoutConfig { TimeoutSeconds = 10 },
+			Rtp = new RtpConfig { TimeoutSeconds = 10 },
         	FedNow = new FedNowConfig { TimeoutSeconds = 10, PollIntervalSeconds = 1, BankRtn = "040104018", BankLegalName = "Baguette Bank" }
         });
 
@@ -58,12 +59,17 @@ public class CreateAchTransferTests
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6004") },
             NullLogger<SwiftGateway>.Instance);
+        var rtpTchGateway = new RtpTchGateway(
+            new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "<xml/>"))
+                { BaseAddress = new Uri("http://localhost:8200") },
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+            NullLogger<RtpTchGateway>.Instance);
         var internalPayment = new InternalPaymentService(db);
         var achPayment = new AchPaymentService(db, gateway, CreatePaymentConfig());
-        var rtpPayment = new RtpPaymentService(db, rtpGateway, CreatePaymentConfig());
+        var rtpPayment = new RtpPaymentService(db, rtpGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
         var fedNowPayment = new FedNowPaymentService(db, mqGateway, new Pacs008Builder(), CreatePaymentConfig());
         var swiftPayment = new SwiftPaymentService(db, swiftGateway, CreatePaymentConfig());
-        var transferService = new TransferService(db, mqGateway, new Pacs008Builder(), CreatePaymentConfig());
+        var transferService = new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
         var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
         controller.ControllerContext = new ControllerContext
         {

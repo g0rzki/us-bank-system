@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Integrations.FedNow;
+using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services.Payments;
 using UsBankSystem.Core.Domain.Transactions;
@@ -16,6 +17,7 @@ namespace UsBankSystem.Api.Services;
 public class TransferService(
     AppDbContext db,
     FedNowMqGateway mqGateway,
+    RtpTchGateway rtpTchGateway,
     Pacs008Builder pacs008Builder,
     IOptions<PaymentSessionConfig> paymentConfig)
 {
@@ -112,6 +114,9 @@ public class TransferService(
 
         if (transfer.Channel == TransferChannel.FedNow)
             return await ApproveFedNowAsync(transfer, userId);
+
+        if (transfer.Channel == TransferChannel.Rtp && transfer.ToRoutingNumber is not null)
+            return await ApproveRtpExternalAsync(transfer, userId);
 
         if (transfer.Channel == TransferChannel.Ach && transfer.ToAccountId is null)
             throw new InvalidOperationException(
@@ -273,6 +278,55 @@ public class TransferService(
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    private async Task<TransferResponse> ApproveRtpExternalAsync(Transfer transfer, Guid userId)
+    {
+        if (transfer.FromAccount is null)
+            throw new InvalidOperationException($"Transfer {transfer.Id} has no source account");
+
+        var config = paymentConfig.Value.Rtp;
+
+        transfer.ApprovedBy = userId;
+        transfer.ApprovedAt = DateTime.UtcNow;
+
+        var accountOwner = await db.Users.FirstOrDefaultAsync(u => u.Id == transfer.FromAccount.UserId);
+        var senderName = accountOwner is not null ? $"{accountOwner.FirstName} {accountOwner.LastName}" : "Unknown";
+
+        var msgId = $"MSG-{DateTime.UtcNow:yyyyMMdd}-{transfer.Id:N}";
+        var endToEndId = $"E2E-{transfer.Id:N}";
+
+        var pacs008Xml = pacs008Builder.Build(new Pacs008Data(
+            MsgId: msgId,
+            EndToEndId: endToEndId,
+            Amount: transfer.Amount,
+            Currency: transfer.Currency,
+            DebtorBankName: config.BankCode,
+            DebtorBankRtn: config.BankRtn,
+            DebtorName: senderName,
+            DebtorAccountNumber: transfer.FromAccount.AccountNumber,
+            CreditorBankName: transfer.ToBankCode ?? transfer.ToRoutingNumber ?? "",
+            CreditorBankRtn: transfer.ToRoutingNumber ?? "",
+            CreditorName: transfer.RecipientName ?? "Unknown",
+            CreditorAccountNumber: transfer.ToAccountNumber ?? "",
+            Description: transfer.Description
+        ));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(config.TimeoutSeconds));
+        var result = await rtpTchGateway.SendPacs008Async(pacs008Xml, cts.Token);
+
+        if (!result.Success)
+        {
+            transfer.Status = TransferStatus.Failed;
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            await db.SaveChangesAsync();
+            return PaymentServiceBase.MapToResponse(transfer);
+        }
+
+        transfer.Status = TransferStatus.Pending;
+        transfer.ExternalReferenceId = endToEndId;
+        await db.SaveChangesAsync();
+        return PaymentServiceBase.MapToResponse(transfer);
     }
 
     private async Task<TransferResponse> ApproveFedNowAsync(Transfer transfer, Guid userId)
