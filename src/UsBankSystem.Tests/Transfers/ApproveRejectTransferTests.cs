@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Controllers;
 using UsBankSystem.Api.Integrations;
+using System.Xml.Linq;
 using UsBankSystem.Api.Integrations.FedNow;
 using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Models.Responses;
@@ -54,6 +55,9 @@ public class ApproveRejectTransferTests
         NullLogger<RtpTchGateway>.Instance);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode mqStatus = HttpStatusCode.OK, HttpStatusCode rtpTchStatus = HttpStatusCode.OK)
+        => CreateControllerWithHandler(db, userId, new MockHttpMessageHandler(rtpTchStatus, "<xml/>"), mqStatus);
+
+    private TransfersController CreateControllerWithHandler(AppDbContext db, Guid userId, HttpMessageHandler rtpTchHandler, HttpStatusCode mqStatus = HttpStatusCode.OK)
     {
         var achGateway = AchTestHelpers.CreateGateway();
         var rtpGateway = new RtpGateway(
@@ -68,7 +72,10 @@ public class ApproveRejectTransferTests
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
                 { BaseAddress = new Uri("http://localhost:6004") },
             NullLogger<SwiftGateway>.Instance);
-        var rtpTchGateway = CreateRtpTchGateway(rtpTchStatus);
+        var rtpTchGateway = new RtpTchGateway(
+            new HttpClient(rtpTchHandler) { BaseAddress = new Uri("http://localhost:8200") },
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+            NullLogger<RtpTchGateway>.Instance);
 
         var internalPayment = new InternalPaymentService(db);
         var achPayment = new AchPaymentService(db, achGateway, CreatePaymentConfig());
@@ -344,6 +351,7 @@ public class ApproveRejectTransferTests
             ToAccountId = null,
             ToAccountNumber = "333999333999",
             ToRoutingNumber = "010101012",
+            ToBankCode = "BANKA",
             RecipientName = "Miku",
             Amount = 30m,
             Currency = "USD",
@@ -362,7 +370,8 @@ public class ApproveRejectTransferTests
     public async Task Approve_RtpExternal_SetsPendingAndSendsPacs008()
     {
         var (db, parentUserId, juniorAccountId, transferId) = await SetupRtpExternal();
-        var controller = CreateController(db, parentUserId);
+        var handler = new CapturingHttpMessageHandler(HttpStatusCode.OK, "<xml/>");
+        var controller = CreateControllerWithHandler(db, parentUserId, handler);
 
         var result = await controller.Approve(transferId);
 
@@ -381,6 +390,15 @@ public class ApproveRejectTransferTests
         Assert.Equal(30m, junior.ReservedBalance);
 
         Assert.Equal(0, await db.Transactions.CountAsync());
+
+        Assert.NotNull(handler.LastRequestBody);
+        var ns = Pacs008Parser.Ns;
+        var doc = XDocument.Parse(handler.LastRequestBody);
+        var cdtrAgtNm = doc.Descendants(ns + "CdtrAgt")
+            .Descendants(ns + "ClrSysMmbId")
+            .Elements(ns + "nm")
+            .FirstOrDefault()?.Value;
+        Assert.Equal("BANKA", cdtrAgtNm);
     }
 
     [Fact]
