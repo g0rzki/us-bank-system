@@ -11,9 +11,13 @@ public class CreateFedNowTransferRequest
     public string ToAccountNumber { get; set; } = null!;
 
     [Required]
+    public string ToRoutingNumber { get; set; } = null!;
+
+    [Required]
     [Range(0.01, double.MaxValue)]
     public decimal Amount { get; set; }
 
     public string Currency { get; set; } = "USD";
+    public string? RecipientName { get; set; }
     public string? Description { get; set; }
 }

@@ -374,8 +374,11 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.Property<string>("ExternalReferenceId")
                         .HasColumnType("text");
 
-                    b.Property<Guid>("FromAccountId")
+                    b.Property<Guid?>("FromAccountId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("RecipientName")
+                        .HasColumnType("text");
 
                     b.Property<DateTime?>("RejectedAt")
                         .HasColumnType("timestamp with time zone");
@@ -391,6 +394,12 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("ToAccountNumber")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ToBankCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ToRoutingNumber")
                         .HasColumnType("text");
 
                     b.HasKey("Id");
@@ -542,8 +551,7 @@ namespace UsBankSystem.Infrastructure.Persistence.Migrations
                     b.HasOne("UsBankSystem.Core.Entities.Account", "FromAccount")
                         .WithMany("Transfers")
                         .HasForeignKey("FromAccountId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("UsBankSystem.Core.Entities.Account", "ToAccount")
                         .WithMany()

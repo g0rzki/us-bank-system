@@ -14,6 +14,11 @@ public class CreateRtpTransferRequest
     [Range(0.01, double.MaxValue)]
     public decimal Amount { get; set; }
 
+    public string? ToRoutingNumber { get; set; }
+
+    public string? ToBankCode { get; set; }
+
     public string Currency { get; set; } = "USD";
+    public string? RecipientName { get; set; }
     public string? Description { get; set; }
 }

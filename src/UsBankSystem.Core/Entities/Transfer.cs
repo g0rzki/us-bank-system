@@ -3,7 +3,7 @@ namespace UsBankSystem.Core.Entities;
 public class Transfer
 {
     public Guid Id { get; set; }
-    public Guid FromAccountId { get; set; }
+    public Guid? FromAccountId { get; set; }
     public Guid? ToAccountId { get; set; }          // null przy transferach zewnętrznych
     public string? ToAccountNumber { get; set; }    // numer konta odbiorcy (zewnętrzny lub wewnętrzny)
     public decimal Amount { get; set; }
@@ -11,6 +11,9 @@ public class Transfer
     public string Channel { get; set; } = null!;    // internal | ach | rtp | fednow | swift
     public string Status { get; set; } = "pending"; // pending | pending_approval | completed | failed | rejected
     public string? ExternalReferenceId { get; set; }
+    public string? ToRoutingNumber { get; set; }
+    public string? ToBankCode { get; set; }
+    public string? RecipientName { get; set; }
     public string? Description { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
@@ -21,6 +24,6 @@ public class Transfer
     public DateTime? ApprovedAt { get; set; }
     public DateTime? RejectedAt { get; set; }
 
-    public Account FromAccount { get; set; } = null!;
+    public Account? FromAccount { get; set; }
     public Account? ToAccount { get; set; }
 }

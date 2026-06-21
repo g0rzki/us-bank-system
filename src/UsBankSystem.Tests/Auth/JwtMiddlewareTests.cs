@@ -17,6 +17,14 @@ public class JwtMiddlewareTests : IClassFixture<WebApplicationFactory<Program>>
     {
         Environment.SetEnvironmentVariable("Jwt__Secret", "test_secret_minimum_32_characters_required!");
 
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "UsBankSystem.sln")))
+            dir = dir.Parent;
+        if (dir != null)
+            Environment.SetEnvironmentVariable("Ach__Sftp__PrivateKeyPath",
+                Path.Combine(dir.FullName, "sftp_keys", "id_rsa"));
+        Environment.SetEnvironmentVariable("Ach__Sftp__AllowUncheckedFingerprint", "true");
+
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>

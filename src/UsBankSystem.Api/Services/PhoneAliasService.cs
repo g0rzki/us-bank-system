@@ -2,13 +2,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Integrations;
+using UsBankSystem.Api.Integrations.FedNow;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services.Payments;
 using UsBankSystem.Core.Domain;
 using UsBankSystem.Core.Domain.Blik;
 using UsBankSystem.Core.Domain.Common;
-using UsBankSystem.Core.Domain.Transactions;
 using UsBankSystem.Core.Domain.Transfers;
 using UsBankSystem.Core.Entities;
 using UsBankSystem.Infrastructure.Persistence;
@@ -20,7 +20,8 @@ public class PhoneAliasService(
     AppDbContext db,
     IKlikP2pClient klikP2p,
     InternalPaymentService internalPayment,
-    FedNowGateway fedNowGateway,
+    FedNowMqGateway mqGateway,
+    Pacs008Builder pacs008Builder,
     IOptions<PaymentSessionConfig> paymentConfig,
     IConfiguration cfg)
 {
@@ -150,46 +151,44 @@ public class PhoneAliasService(
         db.Transfers.Add(transfer);
         await db.SaveChangesAsync();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(paymentConfig.Value.FedNow.TimeoutSeconds));
-        var gatewayResult = await fedNowGateway.SendAsync(new PaymentGatewayRequest(
-            TransferId: transfer.Id,
+        var config = paymentConfig.Value.FedNow;
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Accounts.Any(a => a.Id == account.Id));
+        var senderName = user is not null ? $"{user.FirstName} {user.LastName}" : "Unknown";
+
+        var msgId = $"MSG-{DateTime.UtcNow:yyyyMMdd}-{transfer.Id:N}";
+        var endToEndId = $"E2E-{transfer.Id:N}";
+
+        var pacs008Xml = pacs008Builder.Build(new Pacs008Data(
+            MsgId: msgId,
+            EndToEndId: endToEndId,
             Amount: amount,
             Currency: transfer.Currency,
-            Description: transfer.Description,
-            Metadata: new Dictionary<string, string>
-            {
-                ["toPhone"] = phone,
-                ["toAccountNumber"] = lookup.AccountNumber ?? string.Empty
-            }
-        ), cts.Token);
+            DebtorBankName: config.BankLegalName,
+            DebtorBankRtn: config.BankRtn,
+            DebtorName: senderName,
+            DebtorAccountNumber: account.AccountNumber,
+            CreditorBankName: "Unknown Bank",
+            CreditorBankRtn: lookup.RoutingNumber ?? string.Empty,
+            CreditorName: "Unknown",
+            CreditorAccountNumber: lookup.AccountNumber ?? string.Empty,
+            Description: transfer.Description
+        ));
 
-        if (!gatewayResult.Success)
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(config.TimeoutSeconds));
+        var (success, error) = await mqGateway.SendXmlAsync(
+            System.Text.Encoding.UTF8.GetBytes(pacs008Xml), cts.Token);
+
+        if (!success)
         {
             transfer.Status = TransferStatus.Failed;
             account.ReservedBalance -= amount;
             await db.SaveChangesAsync();
-            throw new InvalidOperationException(gatewayResult.Error ?? "FedNow gateway error");
+            throw new InvalidOperationException(error ?? "FedNow MQ gateway error");
         }
 
-        account.Balance -= amount;
-        account.ReservedBalance -= amount;
-        transfer.Status = TransferStatus.Completed;
-        transfer.CompletedAt = DateTime.UtcNow;
-        transfer.ExternalReferenceId = gatewayResult.ExternalReferenceId;
-
-        db.Transactions.Add(new Transaction
-        {
-            Id = Guid.NewGuid(),
-            AccountId = account.Id,
-            Amount = amount,
-            Type = TransactionType.Debit,
-            Status = TransactionStatus.Completed,
-            Description = transfer.Description ?? "P2P FedNow transfer",
-            ReferenceId = transfer.Id.ToString(),
-            CreatedAt = DateTime.UtcNow
-        });
-
+        transfer.ExternalReferenceId = msgId;
         await db.SaveChangesAsync();
+
         return PaymentServiceBase.MapToResponse(transfer);
     }
 

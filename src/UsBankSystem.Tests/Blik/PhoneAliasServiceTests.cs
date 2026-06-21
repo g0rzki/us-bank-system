@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Integrations;
+using UsBankSystem.Api.Integrations.FedNow;
 using UsBankSystem.Api.Services;
 using UsBankSystem.Api.Services.Payments;
 using UsBankSystem.Core.Domain.Blik;
@@ -37,23 +38,24 @@ public class PhoneAliasServiceTests
     private static IOptions<PaymentSessionConfig> CreatePaymentConfig() =>
         Options.Create(new PaymentSessionConfig
         {
-            FedNow = new TimeoutConfig { TimeoutSeconds = 10 }
+            FedNow = new FedNowConfig { TimeoutSeconds = 10, PollIntervalSeconds = 1, BankRtn = "040104018", BankLegalName = "Baguette Bank" }
         });
 
-    private static FedNowGateway CreateFedNowGateway(HttpStatusCode status = HttpStatusCode.OK) =>
+    private static FedNowMqGateway CreateMqGateway(HttpStatusCode status = HttpStatusCode.OK) =>
         new(new HttpClient(new MockHttpMessageHandler(status,
-                status == HttpStatusCode.OK ? """{"referenceId":"FEDNOW-P2P-001"}""" : "{}"))
-            { BaseAddress = new Uri("http://localhost:6003") },
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<FedNowGateway>.Instance);
+                status == HttpStatusCode.OK ? """{"status":"sent"}""" : "{}"))
+            { BaseAddress = new Uri("http://localhost:8770") },
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<FedNowMqGateway>.Instance);
 
     private PhoneAliasService CreateService(
         AppDbContext db,
         FakeKlikP2pClient? klik = null,
-        FedNowGateway? fedNow = null) =>
+        FedNowMqGateway? mqGateway = null) =>
         new(db,
             klik ?? new FakeKlikP2pClient(),
             new InternalPaymentService(db),
-            fedNow ?? CreateFedNowGateway(),
+            mqGateway ?? CreateMqGateway(),
+            new Pacs008Builder(),
             CreatePaymentConfig(),
             CreateConfig());
 
@@ -225,19 +227,19 @@ public class PhoneAliasServiceTests
     {
         var (db, userId, fromAccountId) = await SetupUserWithAccount(balance: 500m);
         var fake = new FakeKlikP2pClient(lookupRoutingNumber: OtherRoutingNumber, lookupAccountNumber: "EXT-ACCT-9999");
-        var svc = CreateService(db, fake, CreateFedNowGateway(HttpStatusCode.OK));
+        var svc = CreateService(db, fake, CreateMqGateway(HttpStatusCode.OK));
 
         var result = await svc.SendToPhoneAsync(userId, fromAccountId, "+15550000001", 150m, "USD", null);
 
         var sender = await db.Accounts.FindAsync(fromAccountId);
-        Assert.Equal(350m, sender!.Balance);
-        Assert.Equal(0m, sender.ReservedBalance);
+        Assert.Equal(500m, sender!.Balance);
+        Assert.Equal(150m, sender.ReservedBalance);
 
         var transfer = await db.Transfers.FirstAsync();
         Assert.Equal(TransferChannel.FedNow, transfer.Channel);
-        Assert.Equal("completed", transfer.Status);
-        Assert.Equal("FEDNOW-P2P-001", transfer.ExternalReferenceId);
-        Assert.Equal(1, await db.Transactions.CountAsync());
+        Assert.Equal("pending", transfer.Status);
+        Assert.StartsWith("MSG-", transfer.ExternalReferenceId);
+        Assert.Equal(0, await db.Transactions.CountAsync());
     }
 
     // ── Test 8: SendToPhone lookup 404 → error, balance unchanged ────────────
