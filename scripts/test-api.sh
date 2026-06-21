@@ -6,7 +6,7 @@
 set -uo pipefail
 
 # Załaduj .env jeśli istnieje (strip \r dla Windows CRLF; obsłuż wartości ze spacją)
-if [ -f "$(dirname "$0")/.env" ]; then
+if [ -f "$(dirname "$0")/../.env" ]; then
   while IFS= read -r line; do
     line="${line//$'\r'/}"
     [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
@@ -14,7 +14,7 @@ if [ -f "$(dirname "$0")/.env" ]; then
     key="${line%%=*}"
     value="${line#*=}"
     export "$key=$value"
-  done < "$(dirname "$0")/.env"
+  done < "$(dirname "$0")/../.env"
 fi
 
 BASE_URL="${1:-${API_URL:-http://localhost:5100}}"

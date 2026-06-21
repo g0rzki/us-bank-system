@@ -11,7 +11,7 @@
 # Requires: curl, python3, sftp
 
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # ── load .env ──────────────────────────────────────────────────────────────────
 if [[ ! -f .env ]]; then
@@ -31,7 +31,7 @@ ACH_SFTP_KEY="${Ach__Sftp__PrivateKeyPath:-}"
 # Resolve key path: docker-compose mounts it at /app/sftp_keys/id_rsa, but on the
 # host the key lives next to this repo. Try common locations.
 if [[ ! -f "$ACH_SFTP_KEY" ]]; then
-  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
   for candidate in \
     "$SCRIPT_DIR/../payment-settlement-systems/FedSystems/SFTP_Keys/$ACH_SFTP_USER/id_rsa" \
     "$SCRIPT_DIR/../payment-settlement-systems/FedSystems/SFTP_Keys/baguette-bank/id_rsa"; do

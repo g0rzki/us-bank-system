@@ -153,7 +153,7 @@ RTN banku, nazwa i RTN Fed Reserve → [Tabela konfiguracji](#tabela-konfiguracj
 - Prenoty (kody NACHA `23`/`33`) są pomijane — FedSystems może je wysyłać jako weryfikację konta. Aktualnie lądują jako niezidentyfikowane linie w logach.
 - Debety przychodzące (`27`/`28`/`37`/`38`) logowane jako `LogWarning`, ale nie są księgowane.
 
-**Jak przetestować:** `bash verify-ach-integration.sh` — sprawdza łączność SFTP z FedSystems, wymianę plików i ACH Helper. Read-only, nie tworzy przelewów.
+**Jak przetestować:** `bash scripts/verify-ach-integration.sh` — sprawdza łączność SFTP z FedSystems, wymianę plików i ACH Helper. Read-only, nie tworzy przelewów.
 
 ---
 
@@ -189,7 +189,7 @@ RTN banku (`040104018`), BankCode (`baguette-bank`), nazwa → [Tabela konfigura
 - Settlement natychmiastowy — `Completed` od razu po zaksięgowaniu, bez mechanizmu opóźnionego rozliczenia.
 - Brak strategii backoff przy niedostępności TCH — polling kontynuuje z tym samym interwałem.
 
-**Jak przetestować:** `bash verify-rtp-integration.sh` — sprawdza łączność z TCHSystems, waliduje `X-Api-Key` poprawny i celowo błędny. Read-only, nie tworzy przelewów.
+**Jak przetestować:** `bash scripts/verify-rtp-integration.sh` — sprawdza łączność z TCHSystems, waliduje `X-Api-Key` poprawny i celowo błędny. Read-only, nie tworzy przelewów.
 
 ---
 
@@ -220,7 +220,7 @@ RTN banku (`040104018`), nazwa (`Baguette Bank`) → [Tabela konfiguracji](#tabe
 - `CreditorBankName` zawsze `"Unknown Bank"` — brak lookupa RTN → nazwa w systemie.
 - Brak opóźnionego rozliczenia — transfer przechodzi w `Completed` po pacs.002 ACCP.
 
-**Jak przetestować:** `bash verify-fednow-integration.sh` — sprawdza łączność z MQ FedSystems, rejestrację banku w FedNow Central. Read-only, nie wysyła komunikatów.
+**Jak przetestować:** `bash scripts/verify-fednow-integration.sh` — sprawdza łączność z MQ FedSystems, rejestrację banku w FedNow Central. Read-only, nie wysyła komunikatów.
 
 ---
 
@@ -268,7 +268,7 @@ BIC banku (`USBKUS01XXX`) → [Tabela konfiguracji](#tabela-konfiguracji).
 - Brak callbacku potwierdzającego faktyczne dotarcie środków — po przyjęciu przez Middleware transfer czeka w `Pending` do wywołania `/receive`. W środowisku mock webhook przychodzi automatycznie po ~kilku sekundach (`Swift:TimeoutSeconds` w `payment-config.json`).
 - Kursy walut statyczne (tabela `ExchangeRates` seedowana przy starcie) — brak integracji z zewnętrznym źródłem kursów.
 
-**Jak przetestować:** `bash verify-swift-integration.sh` — sprawdza OAuth2 token, wysłanie pacs.008, webhook z poprawnym i celowo błędnym sekretem.
+**Jak przetestować:** `bash scripts/verify-swift-integration.sh` — sprawdza OAuth2 token, wysłanie pacs.008, webhook z poprawnym i celowo błędnym sekretem.
 
 ---
 
@@ -305,7 +305,7 @@ BIC banku (`USBKUS01XXX`) → [Tabela konfiguracji](#tabela-konfiguracji).
 - Zablokowana karta: odblokowanie dopiero po 24h od zablokowania
 - Topup: dostępny tylko dla kart prepaid w statusie `active`
 
-**Jak przetestować:** `bash verify-cards-integration.sh` — przy pierwszym uruchomieniu tworzy testową kartę prepaid (kolejne wywołania: idempotentne 409).
+**Jak przetestować:** `bash scripts/verify-cards-integration.sh` — przy pierwszym uruchomieniu tworzy testową kartę prepaid (kolejne wywołania: idempotentne 409).
 
 ---
 
@@ -366,7 +366,7 @@ Scenariusz zweryfikowany end-to-end z Leek Bank (RTN `010101012`) zarejestrowany
 - Jedno aktywne konto: max 1 aktywny alias telefoniczny
 - Numer telefonu: format E.164 dla US (`+1` + 10 cyfr, np. `+15551234567`)
 
-**Jak przetestować:** `bash verify-blik-integration.sh` — health check KLIK, walidacja API key, dostępność webhooka `/klik/webhook/ping`. Read-only.
+**Jak przetestować:** `bash scripts/verify-blik-integration.sh` — health check KLIK, walidacja API key, dostępność webhooka `/klik/webhook/ping`. Read-only.
 
 ---
 
@@ -1229,7 +1229,7 @@ Projekt zawiera skrypty do testowania przepływu end-to-end przez curl.
 ### Happy path — pełny przepływ
 
 ```bash
-bash test-flow.sh
+bash scripts/test-flow.sh
 ```
 
 Skrypt wykonuje: rejestrację użytkownika → login → utworzenie konta → rejestrację karty debitowej i prepaid → topup prepaid → płatność przez POS → zablokowanie karty debitowej. Na końcu wypisuje tokeny kart.
@@ -1237,7 +1237,7 @@ Skrypt wykonuje: rejestrację użytkownika → login → utworzenie konta → re
 ### Edge cases
 
 ```bash
-bash test-edge-cases.sh
+bash scripts/test-edge-cases.sh
 ```
 
 Pokrywa 25 przypadków brzegowych:
@@ -1257,13 +1257,13 @@ Pokrywa 25 przypadków brzegowych:
 ### Komprehensywny test API
 
 ```bash
-bash test-api.sh
+bash scripts/test-api.sh
 ```
 
 Testuje wszystkie endpointy systemu (auth, konta, przelewy, karty, BLIK, P2P, SWIFT, junior). Wymaga uruchomionego środowiska z systemami siostrzanymi. Wczytuje `.env` automatycznie. Sekcja 15 — test SWIFT wychodzącego i webhooka z poprawnym/błędnym sekretem.
 
 ```bash
-bash test-cards-full.sh
+bash scripts/test-cards-full.sh
 ```
 
 Pełny test kart płatniczych (happy path + edge case): nowe konto testowe, karta debitowa i prepaid, topup, płatność przez POS, settlement webhook.
