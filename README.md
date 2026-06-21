@@ -49,7 +49,7 @@ ACH to sieć rozliczeniowa obsługiwana przez **NACHA** (National Automated Clea
 **Limit dzienny:** NACHA pozwala na max **36 plików dziennie** na originator (`file_id_modifier`: A–Z, następnie 0–9). Przekroczenie limitu rzuca wyjątek z komunikatem.
 
 **Identyfikatory:**
-- Nasz RTN: `110000000`
+- Nasz RTN: `040104018` (Baguette Bank, konfigurowalny przez `Ach__RoutingNumber`)
 - RTN Fed Reserve Bank: `090000515`
 - `trace_number`: `{RTN[..8]}{seq:D7}` — unikalny w skali dnia, generowany z DB-backed counter
 
@@ -175,7 +175,7 @@ Komunikacja odbywa się przez zewnętrzny **SWIFT Middleware** (innej grupy). Ba
 
 | Zmienna | Opis | Przykład |
 |---|---|---|
-| `INTEGRATIONS_SWIFT_URL` | URL SWIFT Middleware | `http://localhost:6004` |
+| `INTEGRATIONS_SWIFT_URL` | URL SWIFT Middleware (real: port 3000, mock legacy: 6004) | `http://host.docker.internal:3000` |
 | `Swift__ClientId` | ID klienta OAuth2 | `bank-usbkus01` |
 | `Swift__ClientSecret` | Sekret klienta OAuth2 | `secret-usbkus01` |
 | `Swift__Bic` | BIC naszego banku | `USBKUS01XXX` |
@@ -578,7 +578,7 @@ flowchart LR
 
 ## Konfiguracja sesji płatności
 
-Plik `src/UsBankSystem.Api/payment-config.json` pozwala konfigurować parametry czasowe systemów płatności. W środowisku deweloperskim skracasz wartości żeby testować integracje bez czekania na prawdziwe okna czasowe.
+Plik `src/UsBankSystem.Api/payment-config.json` zawiera **parametry operacyjne** (timeouty, okna batch). Tożsamość banku (BankRtn, BankCode, BankLegalName) konfigurowana jest **wyłącznie przez zmienne środowiskowe** — domyślne wartości w kodzie C# (`PaymentSessionConfig.cs`) to `040104018` / `baguette-bank`.
 
 ```json
 {
@@ -588,7 +588,8 @@ Plik `src/UsBankSystem.Api/payment-config.json` pozwala konfigurować parametry 
       "CutoffHour": 23
     },
     "FedNow": {
-      "TimeoutSeconds": 10
+      "TimeoutSeconds": 30,
+      "PollIntervalSeconds": 1
     },
     "Rtp": {
       "TimeoutSeconds": 10
@@ -611,8 +612,13 @@ Wartości produkcyjne:
 
 ### Wymagania
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (lub Docker Engine + Compose plugin)
-- [Git](https://git-scm.com/)
+| System | Narzędzia |
+|---|---|
+| **macOS** | [Docker Desktop](https://www.docker.com/products/docker-desktop/) lub [Colima](https://github.com/abiosoft/colima) + Docker CLI + Compose plugin, [Git](https://git-scm.com/) |
+| **Windows** | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [Git for Windows](https://gitforwindows.org/) (zawiera Git Bash) |
+| **Linux** | Docker Engine + [Compose plugin](https://docs.docker.com/compose/install/linux/), Git |
+
+> **Windows:** Skrypty `.sh` (testy, verify-*) wymagają **Git Bash** lub **WSL2**. PowerShell nie obsługuje `source .env`. Projekt zawiera `.gitattributes` wymuszający LF w skryptach — `git clone` automatycznie zachowa poprawne zakończenia linii.
 
 ### Krok 1 — Klonowanie repo
 
@@ -623,67 +629,40 @@ cd us-bank-system
 
 ### Krok 2 — Konfiguracja zmiennych środowiskowych
 
-Skopiuj szablon i uzupełnij swoimi danymi:
-
 ```bash
-cp .env.example .env
+cp .env.example .env          # macOS / Linux / Git Bash
+# copy .env.example .env      # Windows CMD
 ```
 
-Otwórz `.env` i uzupełnij:
+Plik `.env.example` zawiera komentarze przy każdej zmiennej, pogrupowane sekcjami. Minimalne zmiany do uruchomienia:
 
 ```env
-POSTGRES_DB=usbank               # nazwa bazy — zostaw bez zmian
-POSTGRES_USER=twoj_user          # dowolna nazwa użytkownika bazy
-POSTGRES_PASSWORD=twoje_haslo
-POSTGRES_PORT=5433               # port na hoście (5433 jeśli lokalny postgres zajmuje 5432)
-FRONTEND_PORT=3000               # port frontendu — kontroluje Docker i CORS jednocześnie
-API_URL=http://localhost:5100    # adres API — używany przez frontend
-JWT_SECRET=min_32_znaki          # dowolny ciąg min. 32 znaków
-WEBHOOK_SECRET=dowolny_sekret    # używany przez mock gateway do wysyłania webhooków
-INTEGRATIONS_ACH_URL=http://localhost:6001
-INTEGRATIONS_RTP_URL=http://localhost:6002
-INTEGRATIONS_FEDNOW_URL=http://localhost:6003
-INTEGRATIONS_SWIFT_URL=http://localhost:6004
-INTEGRATIONS_CARDS_URL=http://payment-gateway:8000   # adres payment-gateway w sieci Docker
-INTEGRATIONS_BLIK_URL=http://localhost:6006           # dev: mock KLIK; prod: URL instancji KLIK
-INTEGRATIONS_KLIK_API_KEY=your_klik_api_key           # klucz API KLIK — wymagany w prod
-KLIK_WEBHOOK_SECRET=dowolny_sekret                    # zabezpieczenie webhooka /klik/webhook/*
-CARDS_API_KEY=bank-key-us-a
-CARDS_HMAC_SECRET=secret-us-a-hmac
-CARDS_ADMIN_KEY=admin-secret-key-2026
-
-# ACH / FedSystems SFTP
-Ach__RoutingNumber=110000000          # nasz RTN (9 cyfr)
-Ach__LegalName=US Bank A             # nazwa banku w nagłówku NACHA
-Ach__FrbRoutingNumber=090000515      # RTN Fed Reserve Bank (RDFI)
-Ach__FrbName=FRB Tungsten            # nazwa RDFI
-Ach__Sftp__Host=fedsystems.example   # hostname serwera SFTP FedSystems
-Ach__Sftp__Port=2221                 # port SFTP
-Ach__Sftp__Username=us-bank-a        # login SFTP
-Ach__Sftp__PrivateKeyPath=sftp_keys/id_rsa   # ścieżka do klucza prywatnego SSH
-Ach__Sftp__HostFingerprint=          # SHA256 fingerprint serwera (zabezpieczenie przed MITM)
+POSTGRES_PASSWORD=twoje_haslo          # dowolne — baza lokalna
+JWT_SECRET=min_32_znaki_dowolny_ciag   # dowolny ciąg min. 32 znaków
 ```
 
-> `FRONTEND_PORT` to jedyne miejsce gdzie ustawiasz port frontendu — `docker-compose.yaml` używa go zarówno do mapowania portów jak i do konfiguracji CORS w API.
+Reszta ma sensowne domyślne wartości deweloperskie. Pełny opis zmiennych — patrz `.env.example`.
+
+> `FRONTEND_PORT` kontroluje zarówno port frontendu w Docker jak i CORS w API — ustaw raz, działa wszędzie.
 
 > Plik `.env` jest wykluczony z gita — nie commituj go.
 
-### Krok 3 — Konfiguracja Ridera
+### Krok 3 — Konfiguracja Ridera (opcjonalne)
 
-Skopiuj szablon `launchSettings.json`:
+Tylko jeśli uruchamiasz API bezpośrednio z IDE (bez Dockera):
 
 ```bash
 cp src/UsBankSystem.Api/Properties/launchSettings.template.json src/UsBankSystem.Api/Properties/launchSettings.json
 ```
 
-Otwórz `launchSettings.json` i uzupełnij wartości w profilu `http` danymi z `.env`:
+Uzupełnij wartości w profilu `http` danymi z `.env`:
 
 ```json
-"ConnectionStrings__Default": "Host=localhost;Port=5433;Database=usbank;Username=POSTGRES_USER;Password=POSTGRES_PASSWORD",
+"ConnectionStrings__Default": "Host=localhost;Port=5999;Database=usbank;Username=POSTGRES_USER;Password=POSTGRES_PASSWORD",
 "Jwt__Secret": "JWT_SECRET"
 ```
 
-> Plik `launchSettings.json` jest wykluczony z gita — nie commituj go.
+> Plik `launchSettings.json` jest wykluczony z gita.
 
 ### Krok 4 — Uruchomienie
 
@@ -691,21 +670,42 @@ Otwórz `launchSettings.json` i uzupełnij wartości w profilu `http` danymi z `
 docker compose up --build
 ```
 
-Pierwsze uruchomienie pobiera obrazy i buduje kontenery — może potrwać kilka minut.
+Pierwsze uruchomienie pobiera obrazy i buduje kontenery — może potrwać kilka minut. Migracje bazy danych aplikują się automatycznie przy starcie.
 
-> `docker compose up` odpala też mock gateway automatycznie jako osobny serwis — nie trzeba nic robić ręcznie.
+> Mock gateway (ACH/RTP/FedNow/KLIK) startuje automatycznie jako osobny serwis.
 
-Aplikacja dostępna pod:
+**Force rebuild** (po zmianach w Dockerfile lub zależnościach):
 
-| Serwis | URL |
-|---|---|
-| Frontend | http://localhost:3000 |
-| API | http://localhost:5100 |
-| Swagger UI | http://localhost:5100/swagger |
-| Health check | http://localhost:5100/health |
-| Mock KLIK C2B+P2P | http://localhost:6006 |
+```bash
+docker compose build --no-cache && docker compose up
+```
 
-> Jeśli uruchamiasz razem z projektem **Karty-Platnicze-Aplikacje-Biznesowe**, po każdym `docker compose up` w us-bank-system musisz podłączyć kontener banku do sieci payment-gatewaya, żeby settlement działał:
+#### Serwisy dostępne po uruchomieniu
+
+| Serwis | URL | Wymaga systemu siostrzanego? |
+|---|---|---|
+| Frontend | http://localhost:3100 | — |
+| API | http://localhost:5100 | — |
+| Swagger UI | http://localhost:5100/swagger | — |
+| Health check | http://localhost:5100/health | — |
+| Mock RTP | http://localhost:6002 | — |
+| Mock FedNow | http://localhost:6003 | — |
+| Mock KLIK C2B+P2P | http://localhost:6006 | — |
+
+#### Serwisy wymagające uruchomienia projektów siostrzanych
+
+| Serwis | URL z hosta | Projekt |
+|---|---|---|
+| ACH Helper (json-to-ach) | http://localhost:8310 | `payment-settlement-systems/FedSystems` |
+| FedSystems SFTP | localhost:2221 | `payment-settlement-systems/FedSystems` |
+| FedNow MQ | http://localhost:8770 | `payment-settlement-systems/FedSystems` |
+| FedNow Central | http://localhost:8514 | `payment-settlement-systems/FedSystems` |
+| TCHSystems RTP | http://localhost:8200 | `payment-settlement-systems/TCHSystems` |
+| SWIFT Middleware | http://localhost:3000 | SWIFT Middleware (osobna grupa) |
+| Payment Gateway (karty) | http://localhost:8072 | `Karty-Platnicze-Aplikacje-Biznesowe` |
+| KLIK (real) | http://localhost:8000 | `KLIK-payments` |
+
+> Jeśli uruchamiasz razem z projektem **Karty-Platnicze-Aplikacje-Biznesowe**, po każdym `docker compose up` w us-bank-system musisz podłączyć kontener banku do sieci payment-gatewaya:
 >
 > ```bash
 > docker network connect cards-backend us-bank-a
@@ -826,17 +826,16 @@ Pełna dokumentacja dostępna przez Swagger UI pod `/swagger` po uruchomieniu ap
 
 ## Integracje zewnętrzne
 
-Projekt integruje się z modułami tworzonymi przez inne grupy. Adresy konfigurowane przez zmienne środowiskowe w `.env`:
+Projekt integruje się z modułami tworzonymi przez inne grupy. Adresy konfigurowane przez zmienne środowiskowe w `.env` (pełna lista z komentarzami — patrz `.env.example`):
 
 ```
-INTEGRATIONS_ACH_URL=http://ach-module
-INTEGRATIONS_RTP_URL=http://rtp-module
-INTEGRATIONS_FEDNOW_URL=http://fednow-module
-INTEGRATIONS_SWIFT_URL=http://swift-module
-INTEGRATIONS_CARDS_URL=http://cards-module
-INTEGRATIONS_BLIK_URL=http://klik-module      # adres KLIK API (mock: http://localhost:6006)
-INTEGRATIONS_KLIK_API_KEY=twoj_api_key        # klucz API od operatora KLIK
-KLIK_WEBHOOK_SECRET=opcjonalny_sekret         # nagłówek X-Webhook-Secret na /klik/webhook/*
+INTEGRATIONS_RTP_TCH_URL=http://host.docker.internal:8200   # TCHSystems RTP
+INTEGRATIONS_FEDNOW_MQ_URL=http://host.docker.internal:8770 # FedSystems MQ
+INTEGRATIONS_SWIFT_URL=http://host.docker.internal:3000      # SWIFT Middleware (real, nie mock 6004)
+INTEGRATIONS_CARDS_URL=http://cards_gateway_app:8000          # Karty-Platnicze w sieci Docker
+INTEGRATIONS_BLIK_URL=http://web:8000                         # KLIK w sieci Docker (mock: http://mock-gateways:6006)
+INTEGRATIONS_KLIK_API_KEY=twoj_api_key                        # klucz API od operatora KLIK
+KLIK_WEBHOOK_SECRET=opcjonalny_sekret                         # nagłówek X-Webhook-Secret na /klik/webhook/*
 ```
 
 **mock stub** (`UsBankSystem.MockGateways`):
@@ -847,7 +846,7 @@ KLIK_WEBHOOK_SECRET=opcjonalny_sekret         # nagłówek X-Webhook-Secret na /
 | FedSystems SFTP | 2221 | Prawdziwy serwer SFTP — upload w `inbound/`, polling `outbound/` co 60s |
 | RTP | 6002 | Mock: czeka kilka sekund i odpowiada synchronicznie `Completed` |
 | FedNow | 6003 | Mock: tak samo jak RTP |
-| SWIFT | 6004 | Mock: odpowiada natychmiast, webhook po dłuższym czasie |
+| SWIFT (legacy mock) | 6004 | Mock: odpowiada natychmiast, webhook po dłuższym czasie. **Real SWIFT Middleware działa na porcie 3000.** |
 | KLIK C2B+P2P | 6006 | Mock KLIK: kody C2B (TTL 120s), symulacja terminala (`POST /simulate/initiate`), potwierdzenia z fee 1%+0.5%, aliasy P2P (register/lookup/delete) |
 
 Czasy opóźnień dla mock stubów (RTP/FedNow/SWIFT) są brane z `payment-config.json`.
@@ -1081,7 +1080,7 @@ git checkout -b feature/US-XX-krotki-opis
 ## Dokumentacja
 
 - [Backlog — Trello](https://trello.com/b/SoYXGs0x/tablica-projektowa)
-- [Swagger UI](http://localhost:5000/swagger) — po uruchomieniu aplikacji
+- [Swagger UI](http://localhost:5100/swagger) — po uruchomieniu aplikacji
 
 ---
 
