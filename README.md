@@ -547,6 +547,13 @@ flowchart TD
     POLL -->|5. pacs.002 ACCP| MQ[POST /send → MQ]
 ```
 
+**Legenda kroków:**
+1. `FedNowPollingService` odpytuje FedSystems MQ co 1s (`GET /FIFO/out`) i odbiera pacs.008 od innego banku
+2. `Pacs008Parser.Parse()` wyciąga dane nadawcy, odbiorcy, kwotę i `EndToEndId`; waliduje RTN odbiorcy i sprawdza duplikat
+3. Saldo konta odbiorcy zwiększone o kwotę przelewu
+4. Transfer zapisany z `Status = Completed`, transakcja `Credit` dodana do historii
+5. `Pacs002Builder.Build()` wysyła odpowiedź ACCP do FedSystems MQ (`POST /send`)
+
 **Request-to-pay (pain.013 od KLIK):**
 
 ```mermaid
@@ -561,6 +568,16 @@ flowchart TD
     FS -->|7. pacs.002 ACCP| POLL
     POLL -->|8. Transfer Completed| DB
 ```
+
+**Legenda kroków:**
+1. `FedNowPollingService` odbiera pain.013 (request-to-pay) z KLIK przez FedSystems MQ
+2. `Pain013Parser.Parse()` wyciąga dane; walidacja konta odbiorcy i dostępności salda
+3. Saldo rezerwowane (`ReservedBalance += amount`), transfer zapisany z `Status = Pending`
+4. `Pacs014Builder.Build()` wysyła pain.014 z akceptacją do FedSystems MQ (potwierdzenie przyjęcia zlecenia)
+5. `Pacs008Builder.Build()` tworzy właściwy przelew ISO 20022
+6. pacs.008 wysyłany do banku KLIK przez FedSystems MQ
+7. FedSystems dostarcza pacs.002 potwierdzający ACCP (bank nadawcy potwierdził realizację)
+8. Transfer oznaczony `Status = Completed`, saldo skredytowane, rezerwacja zwolniona
 
 ### Przepływ przelewu RTP (BPMN)
 
@@ -885,7 +902,7 @@ Reszta ma sensowne domyślne wartości deweloperskie. Pełny opis zmiennych — 
 
 > Plik `.env` jest wykluczony z gita — nie commituj go.
 
-### Krok 3 — Konfiguracja Ridera (opcjonalne)
+### Krok 3 — Konfiguracja IDE (opcjonalne)
 
 Tylko jeśli uruchamiasz API bezpośrednio z IDE (bez Dockera):
 
@@ -926,8 +943,10 @@ docker compose build --no-cache && docker compose up
 | API | http://localhost:5100 | — |
 | Swagger UI | http://localhost:5100/swagger | — |
 | Health check | http://localhost:5100/health | — |
+| Mock ACH | http://localhost:6001 | — |
 | Mock RTP | http://localhost:6002 | — |
 | Mock FedNow | http://localhost:6003 | — |
+| Mock SWIFT | http://localhost:6004 | — |
 | Mock KLIK C2B+P2P | http://localhost:6006 | — |
 
 #### Serwisy wymagające uruchomienia projektów siostrzanych
@@ -1013,6 +1032,7 @@ Pełna dokumentacja dostępna przez Swagger UI pod `/swagger` po uruchomieniu ap
 | POST | /transfers/rtp | Przelew RTP (real-time) |
 | POST | /transfers/fednow | Przelew FedNow (RTGS) |
 | POST | /transfers/swift | Przelew SWIFT (międzynarodowy) |
+| POST | /transfers/swift/receive | Webhook przychodzący od SWIFT Middleware (`X-SWIFT-Message-Type`, `X-SWIFT-UETR`) |
 | GET | /transfers | Lista przelewów użytkownika |
 | GET | /transfers/{id}/status | Status przelewu |
 | GET | /transfers/pending-approval | Przelewy juniora czekające na zatwierdzenie |
@@ -1074,11 +1094,10 @@ KLIK_WEBHOOK_SECRET=opcjonalny_sekret                         # nagłówek X-Web
 
 | Kanał | Port | Zachowanie |
 |---|---|---|
-| ACH helper | 8310 | Konwertuje JSON z detalami przelewu → plik NACHA (`POST /json-to-ach`). Wymagany lokalnie. |
-| FedSystems SFTP | 2221 | Prawdziwy serwer SFTP — upload w `inbound/`, polling `outbound/` co 60s |
+| ACH | 6001 | Mock: przyjmuje `POST /json-to-ach` z JSON detalami przelewu, zwraca bajty NACHA |
 | RTP | 6002 | Mock: czeka kilka sekund i odpowiada synchronicznie `Completed` |
 | FedNow | 6003 | Mock: tak samo jak RTP |
-| SWIFT (legacy mock) | 6004 | Mock: odpowiada natychmiast, webhook po dłuższym czasie. **Real SWIFT Middleware działa na porcie 3000.** |
+| SWIFT | 6004 | Mock: odpowiada natychmiast, webhook po dłuższym czasie. **Real SWIFT Middleware działa na porcie 3000.** |
 | KLIK C2B+P2P | 6006 | Mock KLIK: kody C2B (TTL 120s), symulacja terminala (`POST /simulate/initiate`), potwierdzenia z fee 1%+0.5%, aliasy P2P (register/lookup/delete) |
 
 Czasy opóźnień dla mock stubów (RTP/FedNow/SWIFT) są brane z `payment-config.json`.
@@ -1333,7 +1352,7 @@ git checkout -b feature/US-XX-krotki-opis
 
 ## Zespół
 
-| Osoba | Zakres                                                |
-|---|-------------------------------------------------------|
-| [Piotr Gorzkiewicz](https://github.com/g0rzki) | Backend core, przelewy zewnętrzne, konto junior, BLIK |
-| [Jakub Siłka](https://github.com/jakub7038) | Auth, frontend, karty, SWIFT                          |
+| Osoba | Zakres |
+|---|---|
+| [Piotr Gorzkiewicz](https://github.com/g0rzki) | Backend core, BLIK, FedNow, RTP |
+| [Jakub Siłka](https://github.com/jakub7038) | Frontend, konto junior, SWIFT, karty, ACH |
