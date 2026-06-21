@@ -497,7 +497,7 @@ flowchart TD
     API -->|3. SendAsync| GW[AchGateway]
     GW -->|4. NextAsync — atomowy licznik| DB
     GW -->|5. GenerateNachaFileAsync| NACHA[/Bajty NACHA/]
-    NACHA -->|6. Upload inbound/{fileId}.ach| SFTP[FedSystems SFTP :2221]
+    NACHA -->|"6. Upload inbound/{fileId}.ach"| SFTP[FedSystems SFTP :2221]
     SFTP -->|7. outbound/*.ack| POLL[AchPollingService]
     POLL -->|co 60s listuje outbound/| SFTP
     POLL -->|8. aktualizuje status| DB
