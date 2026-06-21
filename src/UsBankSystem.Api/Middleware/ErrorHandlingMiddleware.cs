@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 using UsBankSystem.Api.Integrations;
 
 namespace UsBankSystem.Api.Middleware;
@@ -29,6 +30,7 @@ public class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandling
             GatewayUnavailableException => (HttpStatusCode.ServiceUnavailable, "Service unavailable"),
             InvalidOperationException => (HttpStatusCode.Conflict, "Conflict"),
             ArgumentException => (HttpStatusCode.BadRequest, "Bad request"),
+            PostgresException { SqlState: "40001" } => (HttpStatusCode.Conflict, "Concurrent modification — please retry"),
             _ => (HttpStatusCode.InternalServerError, "An unexpected error occurred")
         };
 

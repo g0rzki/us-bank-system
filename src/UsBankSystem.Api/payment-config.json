@@ -7,11 +7,13 @@
     "FedNow": {
       "TimeoutSeconds": 30,
       "PollIntervalSeconds": 1,
-      "BankRtn": "040104018",
-      "BankLegalName": "Baguette Bank"
+      "BankRtn": "110000000",
+      "BankLegalName": "US Bank A"
     },
     "Rtp": {
-      "TimeoutSeconds": 10
+      "TimeoutSeconds": 10,
+      "BankCode": "US_BANK_A",
+      "BankRtn": "110000000"
     },
     "Swift": {
       "TimeoutSeconds": 30

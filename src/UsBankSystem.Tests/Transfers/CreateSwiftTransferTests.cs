@@ -3,7 +3,9 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
@@ -26,6 +28,7 @@ public class CreateSwiftTransferTests
     private AppDbContext CreateDb() =>
         new(new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options);
 
     private IConfiguration CreateConfig() =>
@@ -58,15 +61,21 @@ public class CreateSwiftTransferTests
             { BaseAddress = new Uri("http://localhost:8770") },
             NullLogger<FedNowMqGateway>.Instance);
 
-    private static SwiftGateway CreateSwiftGateway(HttpStatusCode statusCode) =>
-        new(new HttpClient(new MockHttpMessageHandler(statusCode, """{"referenceId":"SWIFT-REF-001"}"""))
-            { BaseAddress = new Uri("http://localhost:6004") },
+    private static SwiftGateway CreateSwiftGateway(HttpStatusCode swiftStatusCode) =>
+        new(new HttpClient(new RoutingMockHttpMessageHandler(
+        [
+            ("/auth/token",  HttpStatusCode.OK,       """{"access_token":"test-token","token_type":"Bearer","expires_in":3600}"""),
+            ("/swift/message", swiftStatusCode,        """{"uetr":"SWIFT-REF-001","status":"accepted","route":[]}""")
+        ])) { BaseAddress = new Uri("http://localhost:6004") },
+            new MemoryCache(new MemoryCacheOptions()),
+            Options.Create(new SwiftOptions()),
             NullLogger<SwiftGateway>.Instance);
 
     private static RtpTchGateway CreateRtpTchGateway() =>
         new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "<xml/>"))
             { BaseAddress = new Uri("http://localhost:8200") },
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        new RtpApiKeyStore(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
         NullLogger<RtpTchGateway>.Instance);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode swiftStatus = HttpStatusCode.OK, decimal swiftDailyLimit = 50_000m)
@@ -76,9 +85,9 @@ public class CreateSwiftTransferTests
         var achPayment = new AchPaymentService(db, CreateAchGateway(), CreatePaymentConfig(swiftDailyLimit));
         var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
         var fedNowPayment = new FedNowPaymentService(db, CreateMqGateway(), new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
-        var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(swiftStatus), CreatePaymentConfig(swiftDailyLimit));
-        var transferService = new TransferService(db, CreateMqGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit));
-        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
+        var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(swiftStatus), CreatePaymentConfig(swiftDailyLimit), NullLogger<SwiftPaymentService>.Instance);
+        var transferService = new TransferService(db, CreateMqGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(swiftDailyLimit), NullLogger<TransferService>.Instance);
+        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig(), NullLogger<TransfersController>.Instance);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -292,5 +301,6 @@ public class CreateSwiftTransferTests
         Assert.Equal(0m, account!.ReservedBalance);
     }
 }
+
 
 

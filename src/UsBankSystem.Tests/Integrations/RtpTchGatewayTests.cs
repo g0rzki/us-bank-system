@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using UsBankSystem.Api.Integrations.Rtp;
@@ -11,7 +11,8 @@ public class RtpTchGatewayTests
     private static RtpTchGateway CreateGateway(HttpStatusCode status, string body = "<xml/>") =>
         new(new HttpClient(new MockHttpMessageHandler(status, body))
             { BaseAddress = new Uri("http://localhost:8200") },
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        new RtpApiKeyStore(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
         NullLogger<RtpTchGateway>.Instance);
 
     [Fact]
@@ -70,3 +71,4 @@ public class RtpTchGatewayTests
         Assert.False(ok);
     }
 }
+

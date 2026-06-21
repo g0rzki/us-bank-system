@@ -1,7 +1,9 @@
+using System.Data;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
+using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Integrations.FedNow;
 using UsBankSystem.Api.Integrations.Rtp;
 using UsBankSystem.Api.Models.Responses;
@@ -19,7 +21,8 @@ public class TransferService(
     FedNowMqGateway mqGateway,
     RtpTchGateway rtpTchGateway,
     Pacs008Builder pacs008Builder,
-    IOptions<PaymentSessionConfig> paymentConfig)
+    IOptions<PaymentSessionConfig> paymentConfig,
+    ILogger<TransferService> logger)
 {
     public async Task<List<TransferResponse>> GetAllAsync(Guid userId)
     {
@@ -192,6 +195,139 @@ public class TransferService(
 
         await db.SaveChangesAsync();
         return PaymentServiceBase.MapToResponse(transfer);
+    }
+
+    public async Task ProcessSwiftReceiveAsync(string uetr, bool isReturn, string xml, CancellationToken ct = default)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+
+        var transfer = await db.Transfers
+            .Include(t => t.FromAccount)
+            .FirstOrDefaultAsync(t => t.ExternalReferenceId == uetr, ct);
+
+        if (transfer is null)
+        {
+            if (!isReturn)
+            {
+                await ProcessIncomingSwiftAsync(uetr, xml, ct);
+                await tx.CommitAsync(ct);
+            }
+            else
+            {
+                await tx.RollbackAsync(ct);
+            }
+            return;
+        }
+
+        if (transfer.Status != TransferStatus.Pending)
+        {
+            await tx.RollbackAsync(ct);
+            return;
+        }
+
+        if (isReturn)
+        {
+            transfer.FromAccount!.ReservedBalance -= transfer.Amount;
+            transfer.Status = TransferStatus.Failed;
+
+            var debit = await db.Transactions.FirstOrDefaultAsync(
+                t => t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit, ct);
+            if (debit is not null)
+                debit.Status = TransactionStatus.Failed;
+        }
+        else
+        {
+            transfer.FromAccount!.Balance -= transfer.Amount;
+            transfer.FromAccount.ReservedBalance -= transfer.Amount;
+            transfer.Status = TransferStatus.Completed;
+            transfer.CompletedAt = DateTime.UtcNow;
+
+            var debit = await db.Transactions.FirstOrDefaultAsync(
+                t => t.ReferenceId == transfer.Id.ToString() && t.Type == TransactionType.Debit, ct);
+            if (debit is not null)
+                debit.Status = TransactionStatus.Completed;
+        }
+
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+    }
+
+    private async Task ProcessIncomingSwiftAsync(string uetr, string xml, CancellationToken ct)
+    {
+        // Idempotency: the unique index would reject a duplicate, but checking first gives a
+        // cleaner log and avoids the exception on normal middleware retries.
+        if (await db.Transfers.AnyAsync(t => t.ExternalReferenceId == uetr, ct))
+        {
+            logger.LogInformation("Incoming SWIFT UETR={Uetr}: already processed, skipping duplicate delivery", uetr);
+            return;
+        }
+
+        var parsed = SwiftGateway.ParseIncoming(xml);
+        if (parsed is null)
+        {
+            logger.LogError("Incoming SWIFT UETR={Uetr}: failed to parse pacs.008 XML — transfer not credited", uetr);
+            return;
+        }
+
+        var creditorRef = parsed.CreditorAccount?.Trim();
+        if (string.IsNullOrWhiteSpace(creditorRef))
+        {
+            logger.LogError("Incoming SWIFT UETR={Uetr}: no creditor account in pacs.008 — transfer not credited", uetr);
+            return;
+        }
+
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.AccountNumber == creditorRef, ct);
+        if (account is null)
+        {
+            logger.LogError("Incoming SWIFT UETR={Uetr}: no account found for creditor '{Creditor}' — transfer not credited", uetr, creditorRef);
+            return;
+        }
+
+        // Convert incoming currency to USD.
+        var amountUsd = parsed.Amount;
+        if (!string.Equals(parsed.Currency, "USD", StringComparison.OrdinalIgnoreCase))
+        {
+            var rate = await db.ExchangeRates.FindAsync([parsed.Currency.ToUpperInvariant()], ct);
+            if (rate is null)
+            {
+                logger.LogError("Incoming SWIFT UETR={Uetr}: no exchange rate for currency '{Currency}' — transfer not credited", uetr, parsed.Currency);
+                return;
+            }
+            amountUsd = Math.Round(parsed.Amount * rate.RateToUsd, 2);
+        }
+
+        account.Balance += amountUsd;
+
+        var incomingTransfer = new Transfer
+        {
+            Id = Guid.NewGuid(),
+            FromAccountId = null,
+            ToAccountId = account.Id,
+            Amount = amountUsd,
+            Currency = "USD",
+            Channel = TransferChannel.Swift,
+            Status = TransferStatus.Completed,
+            ExternalReferenceId = uetr,
+            Description = parsed.Description ?? $"Incoming SWIFT ({parsed.Currency}→USD)",
+            RequiresApproval = false,
+            CreatedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        };
+        db.Transfers.Add(incomingTransfer);
+
+        db.Transactions.Add(new Transaction
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            Amount = amountUsd,
+            Type = TransactionType.Credit,
+            Status = TransactionStatus.Completed,
+            Description = incomingTransfer.Description,
+            ReferenceId = incomingTransfer.Id.ToString(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task ProcessWebhookAsync(Guid transferId, string status, string? referenceId, CancellationToken ct = default)

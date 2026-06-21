@@ -1,9 +1,10 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using UsBankSystem.Api.Configuration;
@@ -66,12 +67,15 @@ public class CreateFedNowTransferTests
     private static SwiftGateway CreateSwiftGateway() =>
         new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"))
             { BaseAddress = new Uri("http://localhost:6004") },
+            new MemoryCache(new MemoryCacheOptions()),
+            Options.Create(new SwiftOptions()),
             NullLogger<SwiftGateway>.Instance);
 
     private static RtpTchGateway CreateRtpTchGateway() =>
         new(new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "<xml/>"))
             { BaseAddress = new Uri("http://localhost:8200") },
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
+        new RtpApiKeyStore(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
         NullLogger<RtpTchGateway>.Instance);
 
     private TransfersController CreateController(AppDbContext db, Guid userId, HttpStatusCode mqStatus = HttpStatusCode.OK)
@@ -81,9 +85,9 @@ public class CreateFedNowTransferTests
         var achPayment = new AchPaymentService(db, CreateAchGateway(), CreatePaymentConfig());
         var rtpPayment = new RtpPaymentService(db, CreateRtpGateway(), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
         var fedNowPayment = new FedNowPaymentService(db, CreateMqGateway(mqStatus), new Pacs008Builder(), CreatePaymentConfig());
-        var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(), CreatePaymentConfig());
-        var transferService = new TransferService(db, CreateMqGateway(mqStatus), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
-        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig());
+        var swiftPayment = new SwiftPaymentService(db, CreateSwiftGateway(), CreatePaymentConfig(), NullLogger<SwiftPaymentService>.Instance);
+        var transferService = new TransferService(db, CreateMqGateway(mqStatus), rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(), NullLogger<TransferService>.Instance);
+        var controller = new TransfersController(transferService, internalPayment, achPayment, rtpPayment, fedNowPayment, swiftPayment, CreateConfig(), NullLogger<TransfersController>.Instance);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -256,3 +260,4 @@ public class CreateFedNowTransferTests
         Assert.Null(transfer.ToAccountId);
     }
 }
+

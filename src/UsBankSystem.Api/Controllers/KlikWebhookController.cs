@@ -36,10 +36,25 @@ public class KlikWebhookController(BlikService blikService, IConfiguration cfg, 
 
     private bool ValidateSecret()
     {
+        var allowUnsigned = string.Equals(cfg["Klik:AllowUnsignedWebhooks"], "true", StringComparison.OrdinalIgnoreCase);
+
+        // When AllowUnsignedWebhooks=true, accept webhooks from the KLIK orchestrator.
+        // The orchestrator sends X-KLIK-Webhook-Source instead of X-Webhook-Secret;
+        // validate the header value to prevent arbitrary callers from spoofing.
+        if (allowUnsigned && Request.Headers.TryGetValue("X-KLIK-Webhook-Source", out var sourceHdr))
+        {
+            var expectedSource = cfg["Klik:WebhookSourceName"] ?? "klik-orchestrator";
+            if (string.Equals(sourceHdr, expectedSource, StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogDebug("Accepted KLIK orchestrator webhook via X-KLIK-Webhook-Source");
+                return true;
+            }
+            logger.LogWarning("X-KLIK-Webhook-Source header present but value '{Actual}' != '{Expected}'", sourceHdr.ToString(), expectedSource);
+        }
+
         var secret = cfg["Klik:WebhookSecret"];
         if (string.IsNullOrEmpty(secret))
         {
-            var allowUnsigned = string.Equals(cfg["Klik:AllowUnsignedWebhooks"], "true", StringComparison.OrdinalIgnoreCase);
             if (allowUnsigned)
             {
                 logger.LogWarning("Webhook secret not configured but AllowUnsignedWebhooks=true — accepting unsigned webhook");

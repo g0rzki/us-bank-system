@@ -9,6 +9,34 @@ public static class DbSeeder
 {
     public static async Task SeedAsync(AppDbContext context)
     {
+        if (!await context.ExchangeRates.AnyAsync())
+        {
+            var now = DateTime.UtcNow;
+            context.ExchangeRates.AddRange(
+                new ExchangeRate { CurrencyCode = "USD", RateToUsd = 1.000000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "EUR", RateToUsd = 1.090000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "GBP", RateToUsd = 1.270000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "CHF", RateToUsd = 1.120000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "JPY", RateToUsd = 0.006700m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "AUD", RateToUsd = 0.650000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "CAD", RateToUsd = 0.730000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "NOK", RateToUsd = 0.093000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "SEK", RateToUsd = 0.095000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "DKK", RateToUsd = 0.146000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "NZD", RateToUsd = 0.600000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "SGD", RateToUsd = 0.740000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "HKD", RateToUsd = 0.128000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "PLN", RateToUsd = 0.250000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "CZK", RateToUsd = 0.044000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "HUF", RateToUsd = 0.002700m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "RON", RateToUsd = 0.220000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "BGN", RateToUsd = 0.560000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "TRY", RateToUsd = 0.030000m, UpdatedAt = now },
+                new ExchangeRate { CurrencyCode = "ZAR", RateToUsd = 0.053000m, UpdatedAt = now }
+            );
+            await context.SaveChangesAsync();
+        }
+
         if (await context.Users.AnyAsync())
             return;
 
@@ -56,7 +84,7 @@ public static class DbSeeder
             AccountNumber = "1000000001",
             Type = "checking",
             Balance = 5420.50m,
-            ReservedBalance = 0m,
+            ReservedBalance = 3295.00m,
             Currency = "USD",
             Status = "active",
             CreatedAt = user1.CreatedAt
@@ -284,7 +312,7 @@ public static class DbSeeder
                 Currency = "USD",
                 Channel = "swift",
                 Status = TransferStatus.Pending,
-                ExternalReferenceId = "SWIFT-2024-000088",
+                ExternalReferenceId = "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
                 Description = "International invoice",
                 RequiresApproval = false,
                 CreatedAt = DateTime.UtcNow.AddHours(-1)
@@ -581,7 +609,7 @@ public static class DbSeeder
         var juniorAccounts = new List<Account>
         {
             new() { Id = Guid.Parse("dddd4444-1111-1111-1111-111111111111"), UserId = juniorUser1.Id, AccountNumber = "4000000001", Type = "checking", Balance = 250.00m, ReservedBalance = 30.00m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) },
-            new() { Id = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), UserId = juniorUser2.Id, AccountNumber = "4000000002", Type = "checking", Balance = 80.50m,  ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) },
+            new() { Id = Guid.Parse("dddd4444-2222-2222-2222-222222222222"), UserId = juniorUser2.Id, AccountNumber = "4000000002", Type = "checking", Balance = 80.50m,  ReservedBalance = 15.00m, Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) },
             new() { Id = Guid.Parse("dddd4444-3333-3333-3333-333333333333"), UserId = juniorUser3.Id, AccountNumber = "4000000003", Type = "checking", Balance = 510.00m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-15) },
             new() { Id = Guid.Parse("dddd4444-4444-4444-4444-444444444444"), UserId = juniorUser4.Id, AccountNumber = "4000000004", Type = "checking", Balance = 120.00m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-2) },
             new() { Id = Guid.Parse("dddd4444-5555-5555-5555-555555555555"), UserId = juniorUser5.Id, AccountNumber = "4000000005", Type = "checking", Balance = 340.75m, ReservedBalance = 0m,     Currency = "USD", Status = "active", CreatedAt = DateTime.UtcNow.AddMonths(-1) },
@@ -602,6 +630,18 @@ public static class DbSeeder
 
         context.JuniorAccounts.AddRange(juniorLinks);
 
+        context.Cards.Add(new Card
+        {
+            Id = Guid.Parse("ffff6666-1111-1111-1111-111111111111"),
+            AccountId = Guid.Parse("dddd4444-1111-1111-1111-111111111111"),
+            Last4 = "0001",
+            Type = "prepaid",
+            Status = "active",
+            DailyLimit = 50m,
+            MonthlyLimit = 300m,
+            ExpiresAt = DateTime.UtcNow.AddYears(3),
+            CreatedAt = DateTime.UtcNow.AddMonths(-2)
+        });
 
         // Junior transactions
         var juniorTransactions = new List<Transaction>

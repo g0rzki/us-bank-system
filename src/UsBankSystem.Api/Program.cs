@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Caching.Memory;
 using UsBankSystem.Api.Configuration;
 using UsBankSystem.Api.Extensions;
 using UsBankSystem.Api.Integrations;
@@ -44,6 +45,9 @@ builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
 builder.Configuration.AddJsonFile("payment-config.json", optional: false, reloadOnChange: true);
 builder.Services.Configure<PaymentSessionConfig>(
     builder.Configuration.GetSection("PaymentSessions"));
+builder.Services.Configure<SwiftOptions>(
+    builder.Configuration.GetSection("Swift"));
+builder.Services.AddMemoryCache();
 
 // Payment gateways — adresy z konfiguracji (env var lub .env); domyślnie mock stubs na localhost
 builder.Services.AddScoped<AchGateway>();
@@ -58,11 +62,13 @@ builder.Services.AddSingleton<Pacs002Builder>();
 builder.Services.AddSingleton<Pain013Parser>();
 builder.Services.AddSingleton<Pain014Builder>();
 builder.Services.AddHostedService<FedNowPollingService>();
+builder.Services.AddSingleton<RtpApiKeyStore>();
+builder.Services.AddHostedService<RtpTchRegistrationService>();
 builder.Services.AddHttpClient<RtpTchGateway>(c =>
-    c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpTchUrl"] ?? "http://localhost:8200"));
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:RtpTchUrl"] ?? "http://localhost:8000"));
 builder.Services.AddHostedService<RtpPollingService>();
 builder.Services.AddHttpClient<SwiftGateway>(c =>
-    c.BaseAddress = new Uri(builder.Configuration["Integrations:SwiftUrl"] ?? "http://localhost:6004"));
+    c.BaseAddress = new Uri(builder.Configuration["Integrations:SwiftUrl"] ?? "http://localhost:3000"));
 builder.Services.AddHttpClient<CardsGateway>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Integrations:CardsUrl"] ?? "http://localhost:6005"));
 builder.Services.AddHttpClient<KlikApiClient>(c =>

@@ -1,6 +1,9 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using UsBankSystem.Api.Integrations;
 using UsBankSystem.Api.Models.Requests;
 using UsBankSystem.Api.Models.Responses;
 using UsBankSystem.Api.Services;
@@ -18,7 +21,8 @@ public class TransfersController(
     RtpPaymentService rtpPayment,
     FedNowPaymentService fedNowPayment,
     SwiftPaymentService swiftPayment,
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    ILogger<TransfersController> logger) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(typeof(List<TransferResponse>), StatusCodes.Status200OK)]
@@ -68,7 +72,10 @@ public class TransfersController(
     {
         var expectedSecret = configuration["Webhook:Secret"];
         var providedSecret = Request.Headers["X-Webhook-Secret"].FirstOrDefault();
-        if (string.IsNullOrEmpty(expectedSecret) || providedSecret != expectedSecret)
+        if (string.IsNullOrEmpty(expectedSecret) || string.IsNullOrEmpty(providedSecret) ||
+            !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(providedSecret),
+                Encoding.UTF8.GetBytes(expectedSecret)))
             return Unauthorized(new { message = "Invalid webhook secret" });
 
         await transferService.ProcessWebhookAsync(id, request.Status, request.ReferenceId);
@@ -114,6 +121,49 @@ public class TransfersController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> CreateSwift([FromBody] CreateSwiftTransferRequest request) =>
         StatusCode(StatusCodes.Status201Created, await swiftPayment.CreateAsync(UserId(), request));
+
+    /// <summary>
+    /// Called by SWIFT Middleware when forwarding an inbound transfer to our bank
+    /// or when returning a rejected transfer (X-SWIFT-Message-Type: RETURN).
+    /// </summary>
+    [HttpPost("swift/receive")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> SwiftReceive(
+        [FromHeader(Name = "X-SWIFT-Message-Type")] string? messageType,
+        [FromHeader(Name = "X-SWIFT-UETR")] string? uetrHeader,
+        CancellationToken cancellationToken)
+    {
+        var webhookSecret = configuration["Swift:WebhookSecret"];
+        var providedSecret = Request.Headers["X-SWIFT-Webhook-Secret"].FirstOrDefault();
+        if (string.IsNullOrEmpty(webhookSecret))
+        {
+            logger.LogWarning("Swift:WebhookSecret is not configured — /transfers/swift/receive is unauthenticated");
+        }
+        else if (string.IsNullOrEmpty(providedSecret) ||
+                 !CryptographicOperations.FixedTimeEquals(
+                     Encoding.UTF8.GetBytes(providedSecret),
+                     Encoding.UTF8.GetBytes(webhookSecret)))
+        {
+            return Unauthorized(new { message = "Invalid SWIFT webhook secret" });
+        }
+
+        string xml;
+        using (var reader = new System.IO.StreamReader(Request.Body))
+            xml = await reader.ReadToEndAsync(cancellationToken);
+
+        var isReturn = string.Equals(messageType, "RETURN", StringComparison.OrdinalIgnoreCase);
+
+        var uetr = uetrHeader ?? SwiftGateway.ExtractUetr(xml);
+        if (string.IsNullOrWhiteSpace(uetr))
+            return BadRequest(new { message = "Missing UETR in request" });
+
+        await transferService.ProcessSwiftReceiveAsync(uetr, isReturn, xml, cancellationToken);
+
+        return Ok(new { status = isReturn ? "return_received" : "received", uetr });
+    }
 
     private Guid UserId() =>
         Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);

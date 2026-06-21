@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -39,9 +39,10 @@ public class ProcessWebhookRtpTests
         var rtpTchGateway = new RtpTchGateway(
             new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, "<xml/>"))
                 { BaseAddress = new Uri("http://localhost:8200") },
+            new RtpApiKeyStore(),
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Rtp:ApiKey"] = "test" }).Build(),
             NullLogger<RtpTchGateway>.Instance);
-        return new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig());
+        return new TransferService(db, mqGateway, rtpTchGateway, new Pacs008Builder(), CreatePaymentConfig(), NullLogger<TransferService>.Instance);
     }
 
     private async Task<(AppDbContext db, Guid accountId, Guid transferId)> Setup()
@@ -113,3 +114,4 @@ public class ProcessWebhookRtpTests
         Assert.Equal(0, await db.Transactions.CountAsync());
     }
 }
+
