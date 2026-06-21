@@ -5,12 +5,16 @@
 
 set -uo pipefail
 
-# Załaduj .env jeśli istnieje (strip \r dla Windows CRLF)
+# Załaduj .env jeśli istnieje (strip \r dla Windows CRLF; obsłuż wartości ze spacją)
 if [ -f "$(dirname "$0")/.env" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source <(sed 's/\r//' "$(dirname "$0")/.env")
-  set +a
+  while IFS= read -r line; do
+    line="${line//$'\r'/}"
+    [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+    [[ "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    export "$key=$value"
+  done < "$(dirname "$0")/.env"
 fi
 
 BASE_URL="${1:-${API_URL:-http://localhost:5100}}"
