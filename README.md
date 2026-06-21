@@ -1254,6 +1254,20 @@ Pokrywa 25 przypadków brzegowych:
 | POS | Zablokowana karta → DECLINED, zły CVV → DECLINED, błędny PAN (Luhn) → 422 |
 | No-auth | Brak tokenu JWT → 401 |
 
+### Komprehensywny test API
+
+```bash
+bash test-api.sh
+```
+
+Testuje wszystkie endpointy systemu (auth, konta, przelewy, karty, BLIK, P2P, SWIFT, junior). Wymaga uruchomionego środowiska z systemami siostrzanymi. Wczytuje `.env` automatycznie. Sekcja 15 — test SWIFT wychodzącego i webhooka z poprawnym/błędnym sekretem.
+
+```bash
+bash test-cards-full.sh
+```
+
+Pełny test kart płatniczych (happy path + edge case): nowe konto testowe, karta debitowa i prepaid, topup, płatność przez POS, settlement webhook.
+
 ### Skrypty weryfikacyjne integracji
 
 Sześć skryptów do weryfikacji łączności z systemami partnerskimi. Każdy wymaga `.env` z odpowiednimi sekretami. Bezpieczne do wielokrotnego uruchamiania.
