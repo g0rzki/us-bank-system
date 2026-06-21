@@ -14,6 +14,72 @@ import '../../../styles/TransferForm.css';
 type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift' | 'p2p';
 
 const US_PHONE_RE = /^\+1\d{10}$/;
+const ABA_WEIGHTS = [3, 7, 1, 3, 7, 1, 3, 7, 1];
+const BIC_RE = /^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$/;
+const IBAN_RE = /^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/;
+
+// ── Validation helpers ────────────────────────────────────────────────────────
+
+function warnRouting(v: string): string | null {
+    if (!v) return null;
+    if (!/^\d+$/.test(v)) return 'Routing number must contain only digits';
+    if (v.length !== 9) return `Must be exactly 9 digits (currently ${v.length})`;
+    const sum = v.split('').reduce((acc, d, i) => acc + parseInt(d) * ABA_WEIGHTS[i], 0);
+    if (sum % 10 !== 0) return 'Invalid ABA checksum — double-check the routing number';
+    return null;
+}
+
+function warnAccountNumber(v: string): string | null {
+    if (!v) return null;
+    if (!/^\d+$/.test(v)) return 'Account number should contain only digits';
+    if (v.length < 4) return `Too short (${v.length} digits) — typically 4–17 digits`;
+    if (v.length > 17) return `Too long (${v.length} digits) — max 17`;
+    return null;
+}
+
+function warnIban(v: string): string | null {
+    if (!v) return null;
+    const s = v.replace(/\s/g, '').toUpperCase();
+    if (!/^[A-Z]{2}/.test(s)) return 'IBAN must start with 2-letter country code (e.g. DE, PL, GB)';
+    if (s.length < 15) return `Too short (${s.length} chars) — minimum 15`;
+    if (s.length > 34) return `Too long (${s.length} chars) — maximum 34`;
+    if (!IBAN_RE.test(s)) return 'Invalid format — expected: CC99BBAN (e.g. DE89370400440532013000)';
+    return null;
+}
+
+function warnBic(v: string): string | null {
+    if (!v) return null;
+    const s = v.toUpperCase();
+    if (s.length !== 8 && s.length !== 11) return `BIC must be 8 or 11 characters (currently ${s.length})`;
+    if (!BIC_RE.test(s)) return 'Invalid BIC format — expected: AAAABBCC or AAAABBCCDDD';
+    return null;
+}
+
+function warnPhone(v: string): string | null {
+    if (!v) return null;
+    if (!v.startsWith('+1')) return 'US number must start with +1';
+    if (!/^\+1\d*$/.test(v)) return 'Must contain only digits after +1';
+    if (v.length !== 12) return `Must be +1 followed by 10 digits (currently ${v.length - 2} digits after +1)`;
+    return null;
+}
+
+function warnAmount(v: string): string | null {
+    if (!v) return null;
+    const n = parseFloat(v);
+    if (isNaN(n)) return 'Not a valid number';
+    if (n <= 0) return 'Amount must be greater than 0';
+    if (n < 0.01) return 'Minimum amount is $0.01';
+    return null;
+}
+
+// ── Warn component ────────────────────────────────────────────────────────────
+
+function Warn({ msg }: { msg: string | null }) {
+    if (!msg) return null;
+    return <span className="tf-hint-warn">⚠ {msg}</span>;
+}
+
+// ── Presets ───────────────────────────────────────────────────────────────────
 
 interface Preset {
     label: string;
@@ -54,6 +120,8 @@ const PRESETS: Record<Channel, Preset[]> = {
     ],
 };
 
+// ── Component ─────────────────────────────────────────────────────────────────
+
 interface Props {
     accounts: Account[];
     channel: Channel;
@@ -76,6 +144,7 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
     const [description, setDescription] = useState('');
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
+    const [touched, setTouched] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         setToAccountNumber('');
@@ -89,7 +158,11 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
         setAmount('');
         setDescription('');
         setPhone('');
+        setTouched(new Set());
     }, [channel]);
+
+    const touch = (field: string) =>
+        setTouched(prev => new Set(prev).add(field));
 
     const applyPreset = (idx: string) => {
         if (!idx) return;
@@ -102,6 +175,16 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
         if (preset.bic !== undefined) setBic(preset.bic);
         if (preset.beneficiaryName !== undefined) setBeneficiaryName(preset.beneficiaryName);
         if (preset.phone !== undefined) setPhone(preset.phone);
+    };
+
+    // Computed warnings (only shown for touched fields)
+    const w = {
+        toRoutingNumber: touched.has('toRoutingNumber') ? warnRouting(toRoutingNumber) : null,
+        toAccountNumber: touched.has('toAccountNumber') ? warnAccountNumber(toAccountNumber) : null,
+        iban:            touched.has('iban')            ? warnIban(iban)               : null,
+        bic:             touched.has('bic')             ? warnBic(bic)                 : null,
+        phone:           touched.has('phone')           ? warnPhone(phone)             : null,
+        amount:          touched.has('amount')          ? warnAmount(amount)           : null,
     };
 
     const handleSubmit = async () => {
@@ -135,6 +218,7 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
             setToRoutingNumber('');
             setRecipientName('');
             setPhone('');
+            setTouched(new Set());
             onSuccess();
             showToast('Transfer submitted successfully', 'success');
         } catch (e: any) {
@@ -177,14 +261,28 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                 {(channel === 'internal' || channel === 'rtp') && (
                     <div className="tf-field">
                         <label>Recipient account number</label>
-                        <input value={toAccountNumber} onChange={e => setToAccountNumber(e.target.value)} placeholder="Account number" />
+                        <input
+                            className={w.toAccountNumber ? 'warn' : ''}
+                            value={toAccountNumber}
+                            onChange={e => setToAccountNumber(e.target.value)}
+                            onBlur={() => touch('toAccountNumber')}
+                            placeholder="Account number"
+                        />
+                        <Warn msg={w.toAccountNumber} />
                     </div>
                 )}
 
                 {channel === 'rtp' && (
                     <div className="tf-field">
                         <label>Routing number <span className="tf-optional">(optional — leave empty for on-us)</span></label>
-                        <input value={toRoutingNumber} onChange={e => setToRoutingNumber(e.target.value)} placeholder="9 digits — TCH external only" />
+                        <input
+                            className={w.toRoutingNumber ? 'warn' : ''}
+                            value={toRoutingNumber}
+                            onChange={e => setToRoutingNumber(e.target.value)}
+                            onBlur={() => touch('toRoutingNumber')}
+                            placeholder="9 digits — TCH external only"
+                        />
+                        <Warn msg={w.toRoutingNumber} />
                     </div>
                 )}
 
@@ -192,11 +290,25 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                     <>
                         <div className="tf-field">
                             <label>Recipient account number</label>
-                            <input value={toAccountNumber} onChange={e => setToAccountNumber(e.target.value)} placeholder="Account number" />
+                            <input
+                                className={w.toAccountNumber ? 'warn' : ''}
+                                value={toAccountNumber}
+                                onChange={e => setToAccountNumber(e.target.value)}
+                                onBlur={() => touch('toAccountNumber')}
+                                placeholder="Account number"
+                            />
+                            <Warn msg={w.toAccountNumber} />
                         </div>
                         <div className="tf-field">
                             <label>Routing number</label>
-                            <input value={toRoutingNumber} onChange={e => setToRoutingNumber(e.target.value)} placeholder="9 digits" />
+                            <input
+                                className={w.toRoutingNumber ? 'warn' : ''}
+                                value={toRoutingNumber}
+                                onChange={e => setToRoutingNumber(e.target.value)}
+                                onBlur={() => touch('toRoutingNumber')}
+                                placeholder="9 digits"
+                            />
+                            <Warn msg={w.toRoutingNumber} />
                         </div>
                     </>
                 )}
@@ -205,15 +317,39 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                     <>
                         <div className="tf-field">
                             <label>Routing number</label>
-                            <input value={toRoutingNumber} onChange={e => setToRoutingNumber(e.target.value)} placeholder="9 digits" />
+                            <input
+                                className={w.toRoutingNumber ? 'warn' : ''}
+                                value={toRoutingNumber}
+                                onChange={e => setToRoutingNumber(e.target.value)}
+                                onBlur={() => touch('toRoutingNumber')}
+                                placeholder="9 digits"
+                            />
+                            <Warn msg={w.toRoutingNumber} />
                         </div>
                         <div className="tf-field">
                             <label>Recipient account number</label>
-                            <input value={toAccountNumber} onChange={e => setToAccountNumber(e.target.value)} placeholder="Account number" />
+                            <input
+                                className={w.toAccountNumber ? 'warn' : ''}
+                                value={toAccountNumber}
+                                onChange={e => setToAccountNumber(e.target.value)}
+                                onBlur={() => touch('toAccountNumber')}
+                                placeholder="Account number"
+                            />
+                            <Warn msg={w.toAccountNumber} />
                         </div>
                         <div className="tf-field">
                             <label>Recipient name</label>
-                            <input value={recipientName} onChange={e => setRecipientName(e.target.value)} placeholder="Max 22 characters" maxLength={22} />
+                            <input
+                                value={recipientName}
+                                onChange={e => setRecipientName(e.target.value)}
+                                placeholder="Max 22 characters"
+                                maxLength={22}
+                            />
+                            {recipientName.length > 18 && (
+                                <span className="tf-hint-warn">
+                                    ⚠ {recipientName.length}/22 characters — backend truncates at 22
+                                </span>
+                            )}
                         </div>
                     </>
                 )}
@@ -222,10 +358,13 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                     <div className="tf-field">
                         <label>Recipient phone number</label>
                         <input
+                            className={w.phone ? 'warn' : ''}
                             value={phone}
                             onChange={e => setPhone(e.target.value)}
+                            onBlur={() => touch('phone')}
                             placeholder="+15551234567"
                         />
+                        <Warn msg={w.phone} />
                     </div>
                 )}
 
@@ -233,19 +372,41 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                     <>
                         <div className="tf-field">
                             <label>IBAN</label>
-                            <input value={iban} onChange={e => setIban(e.target.value)} placeholder="e.g. DE89370400440532013000" />
+                            <input
+                                className={w.iban ? 'warn' : ''}
+                                value={iban}
+                                onChange={e => setIban(e.target.value)}
+                                onBlur={() => touch('iban')}
+                                placeholder="e.g. DE89370400440532013000"
+                            />
+                            <Warn msg={w.iban} />
                         </div>
                         <div className="tf-field">
                             <label>BIC / SWIFT code</label>
-                            <input value={bic} onChange={e => setBic(e.target.value)} placeholder="e.g. DEUTDEDB" />
+                            <input
+                                className={w.bic ? 'warn' : ''}
+                                value={bic}
+                                onChange={e => setBic(e.target.value)}
+                                onBlur={() => touch('bic')}
+                                placeholder="e.g. DEUTDEDB"
+                            />
+                            <Warn msg={w.bic} />
                         </div>
                         <div className="tf-field">
                             <label>Beneficiary name</label>
-                            <input value={beneficiaryName} onChange={e => setBeneficiaryName(e.target.value)} placeholder="Full name" />
+                            <input
+                                value={beneficiaryName}
+                                onChange={e => setBeneficiaryName(e.target.value)}
+                                placeholder="Full name"
+                            />
                         </div>
                         <div className="tf-field">
                             <label>Beneficiary address <span className="tf-optional">(optional)</span></label>
-                            <input value={beneficiaryAddress} onChange={e => setBeneficiaryAddress(e.target.value)} placeholder="Street, city, country" />
+                            <input
+                                value={beneficiaryAddress}
+                                onChange={e => setBeneficiaryAddress(e.target.value)}
+                                placeholder="Street, city, country"
+                            />
                         </div>
                         <div className="tf-field">
                             <label>Charge bearer</label>
@@ -257,7 +418,11 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                         </div>
                         <div className="tf-field">
                             <label>Remittance info <span className="tf-optional">(optional)</span></label>
-                            <input value={remittanceInfo} onChange={e => setRemittanceInfo(e.target.value)} placeholder="Invoice number, purpose..." />
+                            <input
+                                value={remittanceInfo}
+                                onChange={e => setRemittanceInfo(e.target.value)}
+                                placeholder="Invoice number, purpose..."
+                            />
                         </div>
                     </>
                 )}
@@ -268,14 +433,21 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                         type="number"
                         min="0.01"
                         step="0.01"
+                        className={w.amount ? 'warn' : ''}
                         value={amount}
                         onChange={e => setAmount(e.target.value)}
+                        onBlur={() => touch('amount')}
                         placeholder="0.00"
                     />
+                    <Warn msg={w.amount} />
                 </div>
                 <div className="tf-field">
                     <label>Description <span className="tf-optional">(optional)</span></label>
-                    <input value={description} onChange={e => setDescription(e.target.value)} placeholder="What's this for?" />
+                    <input
+                        value={description}
+                        onChange={e => setDescription(e.target.value)}
+                        placeholder="What's this for?"
+                    />
                 </div>
             </div>
 
