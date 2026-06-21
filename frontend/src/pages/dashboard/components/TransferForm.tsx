@@ -15,6 +15,45 @@ type Channel = 'internal' | 'ach' | 'rtp' | 'fednow' | 'swift' | 'p2p';
 
 const US_PHONE_RE = /^\+1\d{10}$/;
 
+interface Preset {
+    label: string;
+    toAccountNumber?: string;
+    toRoutingNumber?: string;
+    recipientName?: string;
+    iban?: string;
+    bic?: string;
+    beneficiaryName?: string;
+    phone?: string;
+}
+
+const PRESETS: Record<Channel, Preset[]> = {
+    internal: [
+        { label: 'Jane — checking 2000000001', toAccountNumber: '2000000001' },
+        { label: 'Bob — checking 3000000001', toAccountNumber: '3000000001' },
+    ],
+    ach: [
+        { label: 'External (RTN 021000021 / acc 987654321)', toRoutingNumber: '021000021', toAccountNumber: '987654321', recipientName: 'Jane Doe' },
+        { label: 'External savings (RTN 021000021 / acc 111222333)', toRoutingNumber: '021000021', toAccountNumber: '111222333', recipientName: 'Test User' },
+    ],
+    rtp: [
+        { label: 'On-us — Jane (2000000001)', toAccountNumber: '2000000001', toRoutingNumber: '' },
+        { label: 'On-us — Bob (3000000001)', toAccountNumber: '3000000001', toRoutingNumber: '' },
+        { label: 'TCH external (RTN 021000021 / acc 987654321)', toAccountNumber: '987654321', toRoutingNumber: '021000021' },
+    ],
+    fednow: [
+        { label: 'External (RTN 010101012 / acc 3000000001)', toAccountNumber: '3000000001', toRoutingNumber: '010101012' },
+        { label: 'External (RTN 021000021 / acc 987654321)', toAccountNumber: '987654321', toRoutingNumber: '021000021' },
+    ],
+    swift: [
+        { label: 'Poland — Jan Kowalski', iban: 'PL61109010140000071219812874', bic: 'PLBKPL01XXX', beneficiaryName: 'Jan Kowalski' },
+        { label: 'Germany — Hans Mueller', iban: 'DE89370400440532013000', bic: 'DEBKDE01XXX', beneficiaryName: 'Hans Mueller' },
+        { label: 'UK — John Smith', iban: 'GB29NWBK60161331926819', bic: 'UKBKGB01XXX', beneficiaryName: 'John Smith' },
+    ],
+    p2p: [
+        { label: '+15551234567 (test)', phone: '+15551234567' },
+    ],
+};
+
 interface Props {
     accounts: Account[];
     channel: Channel;
@@ -26,6 +65,7 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
     const [fromAccountId, setFromAccountId] = useState(accounts[0]?.id ?? '');
     const [toAccountNumber, setToAccountNumber] = useState('');
     const [toRoutingNumber, setToRoutingNumber] = useState('');
+    const [recipientName, setRecipientName] = useState('');
     const [iban, setIban] = useState('');
     const [bic, setBic] = useState('');
     const [beneficiaryName, setBeneficiaryName] = useState('');
@@ -40,6 +80,7 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
     useEffect(() => {
         setToAccountNumber('');
         setToRoutingNumber('');
+        setRecipientName('');
         setIban('');
         setBic('');
         setBeneficiaryName('');
@@ -49,6 +90,19 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
         setDescription('');
         setPhone('');
     }, [channel]);
+
+    const applyPreset = (idx: string) => {
+        if (!idx) return;
+        const preset = PRESETS[channel][parseInt(idx)];
+        if (!preset) return;
+        if (preset.toAccountNumber !== undefined) setToAccountNumber(preset.toAccountNumber);
+        if (preset.toRoutingNumber !== undefined) setToRoutingNumber(preset.toRoutingNumber);
+        if (preset.recipientName !== undefined) setRecipientName(preset.recipientName);
+        if (preset.iban !== undefined) setIban(preset.iban);
+        if (preset.bic !== undefined) setBic(preset.bic);
+        if (preset.beneficiaryName !== undefined) setBeneficiaryName(preset.beneficiaryName);
+        if (preset.phone !== undefined) setPhone(preset.phone);
+    };
 
     const handleSubmit = async () => {
         const amt = parseFloat(amount);
@@ -60,14 +114,14 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                 if (!toAccountNumber) { showToast('Enter recipient account number'); return; }
                 await createInternalTransfer({ fromAccountId, toAccountNumber, amount: amt, currency: 'USD', description: description || undefined });
             } else if (channel === 'ach') {
-                if (!toRoutingNumber || !toAccountNumber) { showToast('Routing and account numbers are required'); return; }
-                await createAchTransfer({ fromAccountId, toRoutingNumber, toAccountNumber, amount: amt, currency: 'USD', description: description || undefined });
+                if (!toRoutingNumber || !toAccountNumber || !recipientName) { showToast('Routing number, account number and recipient name are required'); return; }
+                await createAchTransfer({ fromAccountId, toRoutingNumber, toAccountNumber, recipientName, amount: amt, currency: 'USD', description: description || undefined });
             } else if (channel === 'rtp') {
                 if (!toAccountNumber) { showToast('Enter recipient account number'); return; }
-                await createRtpTransfer({ fromAccountId, toAccountNumber, amount: amt, currency: 'USD', description: description || undefined });
+                await createRtpTransfer({ fromAccountId, toAccountNumber, toRoutingNumber: toRoutingNumber || undefined, amount: amt, currency: 'USD', description: description || undefined });
             } else if (channel === 'fednow') {
-                if (!toAccountNumber) { showToast('Enter recipient account number'); return; }
-                await createFedNowTransfer({ fromAccountId, toAccountNumber, amount: amt, currency: 'USD', description: description || undefined });
+                if (!toAccountNumber || !toRoutingNumber) { showToast('Account number and routing number are required'); return; }
+                await createFedNowTransfer({ fromAccountId, toAccountNumber, toRoutingNumber, amount: amt, currency: 'USD', description: description || undefined });
             } else if (channel === 'swift') {
                 if (!iban || !bic || !beneficiaryName) { showToast('IBAN, BIC and beneficiary name are required'); return; }
                 await createSwiftTransfer({ fromAccountId, iban, bic, beneficiaryName, beneficiaryAddress: beneficiaryAddress || undefined, amount: amt, currency: 'USD', chargeBearer, remittanceInfo: remittanceInfo || undefined, description: description || undefined });
@@ -79,6 +133,7 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
             setDescription('');
             setToAccountNumber('');
             setToRoutingNumber('');
+            setRecipientName('');
             setPhone('');
             onSuccess();
             showToast('Transfer submitted successfully', 'success');
@@ -107,11 +162,43 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                     </select>
                 </div>
 
-                {(channel === 'internal' || channel === 'rtp' || channel === 'fednow') && (
+                {PRESETS[channel].length > 0 && (
+                    <div className="tf-field">
+                        <label>Quick fill <span className="tf-optional">(example data)</span></label>
+                        <select onChange={e => { applyPreset(e.target.value); e.currentTarget.value = ''; }}>
+                            <option value="">— select preset —</option>
+                            {PRESETS[channel].map((p, i) => (
+                                <option key={i} value={i}>{p.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                )}
+
+                {(channel === 'internal' || channel === 'rtp') && (
                     <div className="tf-field">
                         <label>Recipient account number</label>
                         <input value={toAccountNumber} onChange={e => setToAccountNumber(e.target.value)} placeholder="Account number" />
                     </div>
+                )}
+
+                {channel === 'rtp' && (
+                    <div className="tf-field">
+                        <label>Routing number <span className="tf-optional">(optional — leave empty for on-us)</span></label>
+                        <input value={toRoutingNumber} onChange={e => setToRoutingNumber(e.target.value)} placeholder="9 digits — TCH external only" />
+                    </div>
+                )}
+
+                {channel === 'fednow' && (
+                    <>
+                        <div className="tf-field">
+                            <label>Recipient account number</label>
+                            <input value={toAccountNumber} onChange={e => setToAccountNumber(e.target.value)} placeholder="Account number" />
+                        </div>
+                        <div className="tf-field">
+                            <label>Routing number</label>
+                            <input value={toRoutingNumber} onChange={e => setToRoutingNumber(e.target.value)} placeholder="9 digits" />
+                        </div>
+                    </>
                 )}
 
                 {channel === 'ach' && (
@@ -123,6 +210,10 @@ export default function TransferForm({ accounts, channel, onSuccess }: Props) {
                         <div className="tf-field">
                             <label>Recipient account number</label>
                             <input value={toAccountNumber} onChange={e => setToAccountNumber(e.target.value)} placeholder="Account number" />
+                        </div>
+                        <div className="tf-field">
+                            <label>Recipient name</label>
+                            <input value={recipientName} onChange={e => setRecipientName(e.target.value)} placeholder="Max 22 characters" maxLength={22} />
                         </div>
                     </>
                 )}

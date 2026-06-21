@@ -73,6 +73,7 @@ export interface CreateAchTransferRequest {
     fromAccountId: string;
     toRoutingNumber: string;
     toAccountNumber: string;
+    recipientName: string;
     amount: number;
     currency: string;
     description?: string;
@@ -81,6 +82,7 @@ export interface CreateAchTransferRequest {
 export interface CreateRtpTransferRequest {
     fromAccountId: string;
     toAccountNumber: string;
+    toRoutingNumber?: string;
     amount: number;
     currency: string;
     description?: string;
@@ -89,6 +91,7 @@ export interface CreateRtpTransferRequest {
 export interface CreateFedNowTransferRequest {
     fromAccountId: string;
     toAccountNumber: string;
+    toRoutingNumber: string;
     amount: number;
     currency: string;
     description?: string;
