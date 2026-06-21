@@ -32,8 +32,14 @@ services:
       - Jwt__Secret=${JWT_SECRET}
       - Webhook__Secret=${WEBHOOK_SECRET}
       - Cors__Origin=http://localhost:${FRONTEND_PORT}
+      - Bank__RoutingNumber=${Bank__RoutingNumber:-021000021}
+      - PaymentSessions__FedNow__BankRtn=${FedNow__BankRtn:-040104018}
+      - PaymentSessions__FedNow__BankLegalName=${FedNow__BankLegalName:-Baguette Bank}
+      - PaymentSessions__Rtp__BankCode=${Rtp__BankCode:-baguette-bank}
+      - PaymentSessions__Rtp__BankRtn=${Rtp__BankRtn:-040104018}
+      - PaymentSessions__Rtp__BankLegalName=${Rtp__BankLegalName:-Baguette Bank}
       - Integrations__RtpUrl=http://mock-gateways:6002
-      - Integrations__RtpTchUrl=${INTEGRATIONS_RTP_TCH_URL:-http://host.docker.internal:8000}
+      - Integrations__RtpTchUrl=${INTEGRATIONS_RTP_TCH_URL:-http://host.docker.internal:8200}
       - Rtp__ApiKey=${Rtp__ApiKey:-}
       - Integrations__FedNowMqUrl=${INTEGRATIONS_FEDNOW_MQ_URL:-http://host.docker.internal:8770}
       - Integrations__SwiftUrl=${INTEGRATIONS_SWIFT_URL:-http://host.docker.internal:3000}

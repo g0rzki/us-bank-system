@@ -27,18 +27,116 @@ Aplikacja webowa symulująca działanie amerykańskiego banku detalicznego. Proj
 
 ---
 
+## Spis treści
+
+- [Krok 0 — systemy siostrzane](#krok-0--systemy-siostrzane)
+- [Tabela konfiguracji](#tabela-konfiguracji)
+- [Wiedza domenowa](#wiedza-domenowa)
+  - [ACH](#ach-automated-clearing-house)
+  - [RTP](#rtp-real-time-payments)
+  - [FedNow](#fednow-rtgs-via-fedsystems)
+  - [SWIFT](#swift)
+  - [Karty płatnicze](#karty-płatnicze)
+  - [BLIK (integracja KLIK)](#blik-integracja-klik)
+  - [Konto junior](#konto-junior)
+- [Diagramy](#diagramy)
+- [Konfiguracja sesji płatności](#konfiguracja-sesji-płatności)
+- [Uruchomienie](#uruchomienie)
+- [Struktura projektu](#struktura-projektu)
+- [API](#api)
+- [Integracje zewnętrzne](#integracje-zewnętrzne)
+- [Integracja z Karty-Platnicze](#integracja-z-karty-platnicze)
+- [Testy](#testy)
+- [Migracje bazy danych](#migracje-bazy-danych)
+- [Workflow Git](#workflow-git)
+
+---
+
+## Krok 0 — systemy siostrzane
+
+Us-bank-system integruje się z czterema zewnętrznymi repozytoriami. Przed uruchomieniem `docker compose up` sklonuj je jako katalogi siostrzane (obok `us-bank-system/`) i uruchom w podanej kolejności:
+
+| Repo | Odpowiedzialny | Wymagany przez |
+|---|---|---|
+| `Karty-Platnicze-Aplikacje-Biznesowe` | Filip | Karty płatnicze |
+| `KLIK-payments` | MarshallBjorn | BLIK C2B, BLIK P2P |
+| `payment-settlement-systems` (FedSystems + TCHSystems) | VanillaMile | ACH, FedNow, RTP |
+| `SWIFT-Aplikacje-Biznesowe` | Jkwasnyy | SWIFT |
+
+```bash
+# FedSystems (ACH + FedNow)
+cd ../payment-settlement-systems/FedSystems && docker compose up -d
+
+# TCHSystems (RTP)
+cd ../payment-settlement-systems/TCHSystems && docker compose up -d
+
+# SWIFT Middleware
+cd ../SWIFT-Aplikacje-Biznesowe && docker compose up -d
+```
+
+> **Sieci Docker:** `docker compose up` w tym repo padnie z błędem, jeśli zewnętrzne sieci `clearing-us-a-karty` lub `target_klik` jeszcze nie istnieją — tworzą je odpowiednio Karty-Platnicze i KLIK-payments przy swoim pierwszym uruchomieniu. Uruchom je przed tym repo.
+
+Pełna lista portów systemów siostrzanych → [Tabela konfiguracji](#tabela-konfiguracji).
+
+---
+
+## Tabela konfiguracji
+
+**Tożsamość banku** (wartości domyślne deweloperskie; zmienne konfigurowane przez `.env`):
+
+| Parametr | Wartość | Zmienne `.env` |
+|---|---|---|
+| RTN banku | `040104018` | `FedNow__BankRtn`, `Rtp__BankRtn`, `Ach__RoutingNumber` |
+| BIC (SWIFT) | `USBKUS01XXX` | `Swift__Bic` |
+| Nazwa prawna | `Baguette Bank` | `FedNow__BankLegalName`, `Rtp__BankLegalName`, `Ach__LegalName` |
+| RTN Fed Reserve Bank | `090000515` | `Ach__FrbRoutingNumber` |
+| Bank routing (BLIK P2P on-us) | `021000021` | `Bank__RoutingNumber` |
+
+**Porty systemów siostrzanych** (z hosta, nie Docker-wewnętrzne):
+
+| System | URL | Zmienna `.env` |
+|---|---|---|
+| FedSystems ACH Helper | `http://localhost:8310` | `FEDSYSTEMS_ACH_URL` |
+| FedSystems SFTP | `localhost:2221` | `Ach__Sftp__Port=2221` |
+| FedSystems FedNow MQ | `http://localhost:8770` | `INTEGRATIONS_FEDNOW_MQ_URL` |
+| FedSystems FedNow Central | `http://localhost:8514` | `FEDNOW_CENTRAL_URL` |
+| TCHSystems RTP | `http://localhost:8200` | `INTEGRATIONS_RTP_TCH_URL` |
+| SWIFT Middleware | `http://localhost:3000` | `INTEGRATIONS_SWIFT_URL` |
+| Payment Gateway (Karty) | `http://localhost:8072` | `INTEGRATIONS_CARDS_URL_HOST` |
+| KLIK (real) | `http://localhost:8000` | `KLIK_URL` |
+
+Pełna lista zmiennych z komentarzami → `.env.example`.
+
+---
+
 ## Wiedza domenowa
 
 ### ACH (Automated Clearing House)
 
-ACH to sieć rozliczeniowa obsługiwana przez **NACHA** (National Automated Clearing House Association). Przelewy są grupowane w **batch files** wysyłanych do Fed Reserve Bank (FRB), który pośredniczy między bankami. Rozliczenie następuje następnego dnia roboczego (**T+1**).
+**Status:** zweryfikowane end-to-end na żywo
 
-**Mechanizm w tym projekcie:**
-- Bank formuje plik **NACHA** (fixed-width, 94-znakowe rekordy) z transakcjami PPD (Prearranged Payment and Deposit)
-- Plik jest uploadowany przez **SFTP** do systemu **FedSystems** (`inbound/`)
-- FedSystems przetwarza batch i zwraca plik `.ack` w `outbound/` (accepted / rejected)
-- Polling co 60 sekund sprawdza wyniki i finalizuje przelewy
-- Przychodzące przelewy od innych banków trafiają jako `processed_*.ach` w `outbound/`
+**Opis:** ACH to sieć rozliczeniowa obsługiwana przez **NACHA** (National Automated Clearing House Association). Bank formuje plik NACHA (fixed-width, 94-znakowe rekordy) z transakcjami PPD i wysyła przez SFTP do **FedSystems** (`payment-settlement-systems/FedSystems`). Rozliczenie następuje następnego dnia roboczego (T+1).
+
+**Przepływ:** Bank → plik NACHA uploadowany przez SFTP do `inbound/` → FedSystems przetwarza i umieszcza `.ack` w `outbound/` → polling co 60s → finalizacja statusu. Przychodzące od innych banków jako `processed_*.ach` w `outbound/`. Szczegółowy diagram → [Przepływ przelewu ACH (BPMN)](#przepływ-przelewu-ach-bpmn).
+
+**Kluczowe pliki:**
+- `src/UsBankSystem.Api/Services/Payments/AchPaymentService.cs`
+- `src/UsBankSystem.Api/Integrations/AchGateway.cs`
+- `src/UsBankSystem.Api/Services/Polling/AchPollingService.cs`
+
+**Konfiguracja:**
+
+| Zmienna | Opis | Przykład |
+|---|---|---|
+| `Ach__Sftp__Host` | Host SFTP FedSystems | `host.docker.internal` |
+| `Ach__Sftp__Port` | Port SFTP | `2221` |
+| `Ach__Sftp__Username` | Nazwa użytkownika SFTP | `baguette-bank` |
+| `Ach__Sftp__PrivateKeyPath` | Ścieżka klucza prywatnego w kontenerze | `/app/sftp_keys/id_rsa` |
+| `Ach__Sftp__AllowUncheckedFingerprint` | Pomija weryfikację SHA256 hosta (dev) | `true` |
+| `Ach__PollIntervalSeconds` | Interwał pollingu `outbound/` | `60` |
+| `Ach__CompanyId` | Company ID w nagłówku NACHA batch | `123456789` |
+
+RTN banku, nazwa i RTN Fed Reserve → [Tabela konfiguracji](#tabela-konfiguracji).
 
 **Kody transakcji NACHA:**
 | Kod | Typ konta | Opis |
@@ -46,108 +144,110 @@ ACH to sieć rozliczeniowa obsługiwana przez **NACHA** (National Automated Clea
 | `22` | Checking | Credit (wpływ na konto rozliczeniowe) |
 | `32` | Savings | Credit (wpływ na konto oszczędnościowe) |
 
-**Limit dzienny:** NACHA pozwala na max **36 plików dziennie** na originator (`file_id_modifier`: A–Z, następnie 0–9). Przekroczenie limitu rzuca wyjątek z komunikatem.
-
 **Identyfikatory:**
-- Nasz RTN: `110000000`
-- RTN Fed Reserve Bank: `090000515`
 - `trace_number`: `{RTN[..8]}{seq:D7}` — unikalny w skali dnia, generowany z DB-backed counter
+- **Limit dzienny:** NACHA pozwala na max **36 plików dziennie** (`file_id_modifier`: A–Z, następnie 0–9)
 
-**Znane ograniczenia:**
-- `.ack` od FedSystems potwierdza tylko poprawność formatu pliku — nie jest to potwierdzenie rozliczenia. Faktyczne rozliczenie następuje po ~3 dniach roboczych bez oddzielnego callbacku. Aktualnie pozytywny `.ack` oznacza transfer jako `Completed`; docelowo wymagany jest osobny job rozliczeniowy.
-- Prenoty (kody NACHA `23`/`33`) są pomijane — FedSystems może je wysyłać jako weryfikację konta przed prawdziwym przelewem. Aktualnie lądują jako niezidentyfikowane linie w logach.
-- Debety przychodzące (`27`/`28`/`37`/`38`) logowane jako `LogWarning`, ale nie są księgowane — wymagają osobnej obsługi.
+**Ograniczenia:**
+- `.ack` od FedSystems potwierdza tylko poprawność formatu pliku — nie jest to potwierdzenie rozliczenia. Faktyczne rozliczenie następuje po ~3 dniach roboczych bez oddzielnego callbacku. Aktualnie pozytywny `.ack` oznacza transfer jako `Completed`.
+- Prenoty (kody NACHA `23`/`33`) są pomijane — FedSystems może je wysyłać jako weryfikację konta. Aktualnie lądują jako niezidentyfikowane linie w logach.
+- Debety przychodzące (`27`/`28`/`37`/`38`) logowane jako `LogWarning`, ale nie są księgowane.
+
+**Jak przetestować:** `bash scripts/verify-ach-integration.sh` — sprawdza łączność SFTP z FedSystems, wymianę plików i ACH Helper. Read-only, nie tworzy przelewów.
+
+---
 
 ### RTP (Real-Time Payments)
 
-RTP to sieć przelewów natychmiastowych operowana przez **The Clearing House** (TCH) — prywatną instytucję rozliczeniową należącą do największych banków amerykańskich. W odróżnieniu od FedNow (bank centralny), RTP działa jako **credit push only** — nadawca inicjuje przelew, odbiorca nie może żądać środków. System działa **24/7/365** z rozliczeniem w czasie rzeczywistym.
+**Status:** zweryfikowane end-to-end na żywo
 
-**Mechanizm w tym projekcie:**
-- `RtpTchGateway` komunikuje się z **TCHSystems** przez HTTP REST API z payloadami ISO 20022 XML (pacs.008 / pacs.002)
-- Uwierzytelnienie przez nagłówek `X-Api-Key` w każdym żądaniu
-- `RtpPollingService` (BackgroundService) odpytuje kolejkę przychodzących wiadomości (`GET /queue/incoming`) co 2 sekundy
-- Przelewy wychodzące wysyłane na `POST /transfers`, odpowiedzi (pacs.002) na `POST /transfers/settle`
+**Opis:** RTP to sieć przelewów natychmiastowych operowana przez **The Clearing House** (TCH) — credit push only, 24/7/365. Bank komunikuje się z **TCHSystems** (`payment-settlement-systems/TCHSystems`) przez REST API z payloadami ISO 20022 XML (pacs.008/pacs.002), uwierzytelniając się nagłówkiem `X-Api-Key`.
 
-**Konfiguracja lokalna:**
+**Przepływ:** Wychodzący: pacs.008 → `POST /transfers` TCHSystems → polling pacs.002 `GET /queue/incoming` co 2s → `Completed`/`Rejected`. Przychodzący: polling kolejki → parse pacs.008 → kredyt na koncie → pacs.002 ACCP odesłany przez `POST /transfers/settle`. Szczegółowe diagramy → [Przepływ przelewu RTP (BPMN)](#przepływ-przelewu-rtp-bpmn).
 
-Wymagania:
-- Projekt `payment-settlement-systems/TCHSystems` sklonowany i uruchomiony (port 8200)
-- Klucz API TCH (`Rtp__ApiKey`) i kod banku (`Rtp__BankCode`) skonfigurowane
+**Kluczowe pliki:**
+- `src/UsBankSystem.Api/Services/Payments/RtpPaymentService.cs`
+- `src/UsBankSystem.Api/Integrations/Rtp/RtpTchGateway.cs`
+- `src/UsBankSystem.Api/Services/Polling/RtpPollingService.cs`
 
-Zmienne środowiskowe (`.env` lub `docker-compose.override.yml`):
+**Konfiguracja:**
 
 | Zmienna | Opis | Przykład |
 |---|---|---|
-| `TCHSYSTEMS_RTP_URL` | URL instancji TCHSystems (odczytywany jako `Integrations:RtpTchUrl`) | `http://localhost:8200` |
-| `Rtp__ApiKey` | Klucz API do nagłówka X-Api-Key | `changeme_rtp_api_key` |
-| `Rtp__BankCode` | Identyfikator banku w komunikatach pacs.008 (pole `nm`) | `baguette-bank` |
-| `Rtp__BankRtn` | RTN banku (9 cyfr) | `040104018` |
+| `INTEGRATIONS_RTP_TCH_URL` | URL TCHSystems (wewnątrz Docker) | `http://host.docker.internal:8200` |
+| `Rtp__ApiKey` | Klucz API `X-Api-Key` — puste = auto-rejestracja przy starcie TCH | `` |
 
-Jak postawić TCHSystems:
-```bash
-cd ../payment-settlement-systems/TCHSystems
-docker compose up
-```
+RTN banku (`040104018`), BankCode (`baguette-bank`), nazwa → [Tabela konfiguracji](#tabela-konfiguracji).
 
 **Obsługiwane przepływy:**
+- **Przelew wychodzący (external):** `POST /transfers/rtp` z `toRoutingNumber` → pacs.008 → TCH → pacs.002 → `Completed`/`Rejected`
+- **Przelew wychodzący (internal):** bez `toRoutingNumber` → wewnętrzny przelew natychmiastowy
+- **Przelew przychodzący:** polling kolejki → parse pacs.008 → kredyt → pacs.002 ACCP. Duplikaty (po `EndToEndId`) ignorowane.
+- **RJCT przychodzącego:** konto odbiorcy nie istnieje lub jest nieaktywne → pacs.002 RJCT odesłany do TCH
 
-- **Przelew wychodzący (external):** `POST /transfers/rtp` z `toRoutingNumber` → status `Pending` → pacs.008 wysłany do TCH (`POST /transfers`) → polling pacs.002 z kolejki → `Completed` (ACCP) / `Rejected` (RJCT). Pole `ToBankCode` trafia do `CdtrAgt/FinInstnId/ClrSysMmbId/nm` w pacs.008 — jeśli nie podane, fallback na `ToRoutingNumber`.
-- **Przelew wychodzący (internal):** `POST /transfers/rtp` bez `toRoutingNumber` → wewnętrzny przelew natychmiastowy przez mock RTP gateway
-- **Przelew przychodzący:** polling `GET /queue/incoming` → parse pacs.008 → walidacja konta odbiorcy → kredyt na koncie → pacs.002 ACCP odesłany przez `POST /transfers/settle`. Duplikaty (po `EndToEndId`) ignorowane.
-- **RJCT przychodzącego:** jeśli konto odbiorcy nie istnieje lub jest nieaktywne → pacs.002 RJCT odesłany do TCH
-- **Zatwierdzanie juniorskich przelewów RTP:** po akceptacji przez rodzica → budowa i wysłanie pacs.008 → status `Pending` → finalizacja przez pacs.002
-
-**Znane ograniczenia:**
-
-- Settlement natychmiastowy — przychodzące przelewy oznaczane jako `Completed` od razu po zaksięgowaniu, bez mechanizmu opóźnionego rozliczenia.
+**Ograniczenia:**
+- Settlement natychmiastowy — `Completed` od razu po zaksięgowaniu, bez mechanizmu opóźnionego rozliczenia.
 - Brak strategii backoff przy niedostępności TCH — polling kontynuuje z tym samym interwałem.
+
+**Jak przetestować:** `bash scripts/verify-rtp-integration.sh` — sprawdza łączność z TCHSystems, waliduje `X-Api-Key` poprawny i celowo błędny. Read-only, nie tworzy przelewów.
+
+---
 
 ### FedNow (RTGS via FedSystems)
 
-FedNow to system przelewów RTGS (Real-Time Gross Settlement) operowany przez Federal Reserve. W odróżnieniu od RTP (The Clearing House), rozliczenie odbywa się bezpośrednio przez bank centralny. System obsługuje przelewy wychodzące (pacs.008), przychodzące (pacs.008 od innego banku) oraz request-to-pay (pain.013 inicjowany przez KLIK).
+**Status:** zweryfikowane end-to-end na żywo
 
-Komunikacja z FedSystems odbywa się przez kolejkę komunikatów (HTTP MQ gateway) — bank wysyła komunikaty ISO 20022 XML na endpoint `/send` i odpytuje `/FIFO/out` o przychodzące wiadomości.
+**Opis:** FedNow to system przelewów RTGS (Real-Time Gross Settlement) operowany przez Federal Reserve. Rozliczenie bezpośrednio przez bank centralny. Bank komunikuje się z **FedSystems** (`payment-settlement-systems/FedSystems`) przez kolejkę komunikatów HTTP (MQ gateway), wysyłając i odbierając ISO 20022 XML na endpoint `/send` i odpytując `/FIFO/out` o przychodzące wiadomości.
 
-**Konfiguracja lokalna:**
+**Przepływ:** Polling `/FIFO/out` co 1s. Wychodzący: pacs.008 → MQ → pacs.002 ACCP/RJCT → `Completed`/`Rejected`. Przychodzący (od innego banku): pacs.008 z MQ → kredyt → pacs.002 ACCP. Request-to-pay od KLIK: pain.013 → walidacja + rezerwacja → pain.014 ACCP + pacs.008 → finalizacja pacs.002. Szczegółowe diagramy → [Przepływ przelewu FedNow (BPMN)](#przepływ-przelewu-fednow-bpmn).
 
-Wymagania:
-- Projekt `payment-settlement-systems/FedSystems` sklonowany jako katalog siostrzany (obok `us-bank-system/`)
-- Skonfigurowany bank testowy z RTN przechodzącym walidację MOD-10
-- Colima (lub Docker Desktop) uruchomiona
+**Kluczowe pliki:**
+- `src/UsBankSystem.Api/Services/Payments/FedNowPaymentService.cs`
+- `src/UsBankSystem.Api/Integrations/FedNow/FedNowMqGateway.cs`
+- `src/UsBankSystem.Api/Integrations/FedNow/Pacs008Builder.cs`
+- `src/UsBankSystem.Api/Services/Polling/FedNowPollingService.cs`
 
-Zmienne środowiskowe (przez `docker-compose.override.yml`, gitignorowany):
+**Konfiguracja:**
 
 | Zmienna | Opis | Przykład |
 |---|---|---|
-| `Integrations__FedNowMqUrl` | URL MQ gateway FedSystems | `http://host.docker.internal:8770` |
-| `FedNow__BankRtn` | RTN banku (9 cyfr, MOD-10) | `040104018` |
-| `FedNow__BankLegalName` | Nazwa prawna banku | `Baguette Bank` |
+| `INTEGRATIONS_FEDNOW_MQ_URL` | URL MQ gateway FedSystems (wewnątrz Docker) | `http://host.docker.internal:8770` |
 | `FedNow__PollIntervalSeconds` | Interwał pollingu (domyślnie 1) | `1` |
 
-Jak postawić FedSystems:
-```bash
-cd ../payment-settlement-systems/FedSystems
-docker compose up
-```
-Panel administracyjny FedSystems dostępny pod `:3310`.
+RTN banku (`040104018`), nazwa (`Baguette Bank`) → [Tabela konfiguracji](#tabela-konfiguracji).
 
-**Obsługiwane przepływy:**
+**Ograniczenia:**
+- `CreditorBankName` zawsze `"Unknown Bank"` — brak lookupa RTN → nazwa w systemie.
+- Brak opóźnionego rozliczenia — transfer przechodzi w `Completed` po pacs.002 ACCP.
 
-- **Przelew wychodzący:** `POST /transfers/fednow` → status `Pending` → pacs.008 wysłany do MQ → polling pacs.002 → `Completed` (ACCP) / `Rejected` (RJCT) / `Failed` (BLCK)
-- **Przelew przychodzący:** polling `/FIFO/out` → parse pacs.008 → walidacja RTN → zaksięgowanie kredytu na koncie odbiorcy → pacs.002 ACCP odesłany do MQ
-- **Request-to-pay (pain.013 od KLIK):** polling pain.013 → walidacja konta i salda → rezerwacja środków → pain.014 ACCP (potwierdzenie odbioru żądania) → pacs.008 (inicjacja przelewu) → finalizacja przez pacs.002
-- **Zatwierdzanie juniorskich przelewów FedNow:** po akceptacji przez rodzica (`POST /transfers/{id}/approve`) → budowa i wysłanie pacs.008 → status `Pending` → finalizacja przez pacs.002
+**Jak przetestować:** `bash scripts/verify-fednow-integration.sh` — sprawdza łączność z MQ FedSystems, rejestrację banku w FedNow Central. Read-only, nie wysyła komunikatów.
 
-**Znane ograniczenia:**
-
-- CreditorBankName zawsze "Unknown Bank" — brak lookupa RTN→nazwa w systemie.
-- Settlement T+{czas} nie jest implementowany — transfer przechodzi w Completed po pacs.002 ACCP, bez mechanizmu opóźnionego rozliczenia.
+---
 
 ### SWIFT
 
-SWIFT (Society for Worldwide Interbank Financial Telecommunication) to globalna sieć pośrednicząca w przesyłaniu komunikatów finansowych między bankami. Sam SWIFT nie przenosi środków — jest wyłącznie siecią komunikatów. Faktyczne rozliczenie odbywa się przez **banki korespondentów**: łańcuch banków pośredniczących, które mają wzajemne rachunki (tzw. nostro/vostro) i faktycznie przesuwają środki między sobą, aż dotrą do banku docelowego.
+**Status:** zweryfikowane end-to-end na żywo
 
-Każdy bank jest identyfikowany przez **BIC** (Bank Identifier Code, np. `USBKUS01XXX`), a każdy przelew przez **UETR** (Unique End-to-end Transaction Reference) — globalnie unikalny UUID śledzący płatność przez całą sieć. Rachunek odbiorcy przekazywany jest w formacie **IBAN**.
+**Opis:** SWIFT (Society for Worldwide Interbank Financial Telecommunication) to globalna sieć komunikatów finansowych dla przelewów międzynarodowych. Każdy bank identyfikowany przez **BIC** (np. `USBKUS01XXX`), każdy przelew przez **UETR** (globalnie unikalny UUID). Sam SWIFT nie przenosi środków — rozliczenie przez łańcuch banków korespondentów (nostro/vostro). Bank komunikuje się z **SWIFT Middleware** (`SWIFT-Aplikacje-Biznesowe`) przez OAuth2 client_credentials + ISO 20022 pacs.008 XML.
+
+**Przepływ:** Wychodzący: walidacja (IBAN + BIC) → rezerwacja salda → OAuth2 token → pacs.008 → Middleware → UETR → `Pending` → callback `POST /transfers/swift/receive` → `Completed`/`Failed`. Przychodzący: Middleware POST `/transfers/swift/receive` → parse pacs.008 → konwersja waluty → kredyt na koncie. Szczegółowe diagramy → [Przepływ przelewu SWIFT (BPMN)](#przepływ-przelewu-swift-bpmn).
+
+**Kluczowe pliki:**
+- `src/UsBankSystem.Api/Services/Payments/SwiftPaymentService.cs`
+- `src/UsBankSystem.Api/Integrations/SwiftGateway.cs`
+- `src/UsBankSystem.Api/Services/TransferService.cs` (metoda `ProcessSwiftReceiveAsync`)
+- `src/UsBankSystem.Core/Domain/Swift/SwiftRequestValidator.cs`
+
+**Konfiguracja:**
+
+| Zmienna | Opis | Przykład |
+|---|---|---|
+| `INTEGRATIONS_SWIFT_URL` | URL SWIFT Middleware | `http://host.docker.internal:3000` |
+| `Swift__ClientId` | ID klienta OAuth2 | `bank-usbkus01` |
+| `Swift__ClientSecret` | Sekret OAuth2 | `secret-usbkus01` |
+| `Swift__WebhookSecret` | Sekret nagłówka `X-SWIFT-Webhook-Secret` | `dev_swift_webhook_secret` |
+
+BIC banku (`USBKUS01XXX`) → [Tabela konfiguracji](#tabela-konfiguracji).
 
 **Koszty (charge bearer):**
 | Kod | Nazwa | Opis |
@@ -156,179 +256,235 @@ Każdy bank jest identyfikowany przez **BIC** (Bank Identifier Code, np. `USBKUS
 | `OUR` | Our (Debt) | Nadawca pokrywa wszystkie opłaty — odbiorca dostaje pełną kwotę |
 | `BEN` | Beneficiary (Cred) | Odbiorca pokrywa wszystkie opłaty — kwota zostaje pomniejszona |
 
-**Mechanizm w tym projekcie:**
-
-Komunikacja odbywa się przez zewnętrzny **SWIFT Middleware** (innej grupy). Bank uwierzytelnia się do niego przez **OAuth2 client\_credentials** i wysyła/odbiera komunikaty **ISO 20022 pacs.008** (XML).
-
-- **Przelew wychodzący:** `POST /transfers/swift` → walidacja → rezerwacja salda → pacs.008 wysłany do middleware (`POST /swift/message`) → middleware zwraca UETR → transfer w statusie `Pending` → middleware wywołuje `POST /transfers/swift/receive` po rozliczeniu lub odrzuceniu
-- **Przelew przychodzący:** middleware wywołuje `POST /transfers/swift/receive` z pacs.008 XML → bank parsuje XML, wyciąga kwotę i walutę (`IntrBkSttlmAmt[@Ccy]`), numer konta odbiorcy (`CdtrAcct/Id/Othr/Id`), przelicza walutę na USD przez tabelę `ExchangeRates` i księguje kredyt na koncie
-
 **Waluty:**
-- **Wychodzące:** wyłącznie **USD**
-- **Przychodzące:** dowolna z 20 walut ISO 4217 (EUR, GBP, CHF, JPY, PLN, ...) — automatycznie konwertowane na USD według statycznej tabeli kursów (`ExchangeRates` w DB)
+- Wychodzące: wyłącznie USD
+- Przychodzące: dowolna z 20 walut ISO 4217 (EUR, GBP, CHF, JPY, PLN, ...) — konwertowane na USD wg statycznej tabeli `ExchangeRates` w DB
 
 **Limity:**
 - Dzienny limit wychodzący: **$50 000 / konto** (konfigurowalny przez `Swift:DailyLimitPerAccount`)
 - Przelew juniora przez SWIFT trafia do `pending_approval` i wymaga zatwierdzenia przez rodzica
 
+**Ograniczenia:**
+- Brak callbacku potwierdzającego faktyczne dotarcie środków — po przyjęciu przez Middleware transfer czeka w `Pending` do wywołania `/receive`. W środowisku mock webhook przychodzi automatycznie po ~kilku sekundach (`Swift:TimeoutSeconds` w `payment-config.json`).
+- Kursy walut statyczne (tabela `ExchangeRates` seedowana przy starcie) — brak integracji z zewnętrznym źródłem kursów.
+
+**Jak przetestować:** `bash scripts/verify-swift-integration.sh` — sprawdza OAuth2 token, wysłanie pacs.008, webhook z poprawnym i celowo błędnym sekretem.
+
+---
+
+### Karty płatnicze
+
+**Status:** zweryfikowane end-to-end na żywo
+
+**Opis:** Integracja z **Karty-Platnicze-Aplikacje-Biznesowe** (payment-gateway + card-provider). Obsługuje karty debitowe (saldo konta bankowego) i prepaid (osobne saldo w payment-gateway). Rejestracja kart podpisywana HMAC-SHA256.
+
+**Typy kart:**
+- **Debit** — podpięta do konta bankowego, rejestrowana jako `VIRTUAL` w payment-gateway, auto-aktywuje się w ciągu ~60s
+- **Prepaid** — własne saldo w payment-gateway; bank automatycznie przeprowadza kartę przez lifecycle (`REQUESTED → PRODUCING → SHIPPED → ACTIVE`)
+
+**Przepływ:** Rejestracja karty (`POST /accounts/{id}/cards`) → HMAC-SHA256 → payment-gateway → token + masked PAN. Płatność: terminal POS autoryzuje w payment-gateway → card-provider settlement `POST /capture` do banku → bank księguje transakcję. Szczegółowy diagram → [Przepływ karty płatniczej (BPMN)](#przepływ-karty-płatniczej-bpmn).
+
+**Kluczowe pliki:**
+- `src/UsBankSystem.Api/Services/CardService.cs`
+- `src/UsBankSystem.Api/Integrations/CardsGateway.cs`
+- `src/UsBankSystem.Api/Controllers/CaptureController.cs`
+
 **Konfiguracja:**
 
 | Zmienna | Opis | Przykład |
 |---|---|---|
-| `INTEGRATIONS_SWIFT_URL` | URL SWIFT Middleware | `http://localhost:6004` |
-| `Swift__ClientId` | ID klienta OAuth2 | `bank-usbkus01` |
-| `Swift__ClientSecret` | Sekret klienta OAuth2 | `secret-usbkus01` |
-| `Swift__Bic` | BIC naszego banku | `USBKUS01XXX` |
-| `Swift__WebhookSecret` | Sekret nagłówka `X-SWIFT-Webhook-Secret` (opcjonalny) | `changeme` |
-
-**Obsługiwane przepływy:**
-
-```mermaid
-flowchart TD
-    U([Użytkownik]) -->|POST /transfers/swift| SVC[SwiftPaymentService]
-    SVC -->|1. Walidacja IBAN + BIC + USD| VAL[SwiftRequestValidator]
-    VAL --> SVC
-    SVC -->|2. Rezerwacja salda + Transfer Pending| DB[(PostgreSQL)]
-    SVC -->|3. Buduje pacs.008 XML + OAuth2 token| GW[SwiftGateway]
-    GW -->|4. POST /swift/message| MW[SWIFT Middleware]
-    MW -->|5. UETR| GW
-    GW --> SVC
-    MW -->|6. POST /transfers/swift/receive pacs.008| RCV[SwiftReceive endpoint]
-    RCV -->|7. Completed / Failed| DB
-```
-
-```mermaid
-flowchart TD
-    MW[SWIFT Middleware] -->|POST /transfers/swift/receive pacs.008 XML| RCV[TransfersController]
-    RCV -->|1. Parse pacs.008| PRS[SwiftGateway.ParseIncoming]
-    PRS -->|UETR + kwota + waluta + CdtrAcct| RCV
-    RCV -->|2. Szukaj UETR w DB| DB[(PostgreSQL)]
-    DB -->|transfer nie istnieje = prawdziwy incoming| RCV
-    RCV -->|3. Lookup ExchangeRates| DB
-    RCV -->|4. Balance += kwota × kurs USD| DB
-    RCV -->|5. Transfer + Transaction Completed| DB
-```
-
-**Znane ograniczenia:**
-- Brak callbacku potwierdzającego faktyczne dotarcie środków — po przyjęciu przez middleware transfer przechodzi w `Pending` do momentu wywołania `/receive`. W środowisku mock webhook przychodzi automatycznie po ~kilku sekundach (`Swift:TimeoutSeconds` w `payment-config.json`).
-- Kursy walut są statyczne (tabela `ExchangeRates` seedowana przy starcie) — brak integracji z zewnętrznym źródłem kursów.
-
-### Karty płatnicze
-
-Integracja z zewnętrznym systemem **Karty-Platnicze-Aplikacje-Biznesowe** (payment-gateway + card-provider).
-
-**Typy kart:**
-- **Debit** — podpięta do konta bankowego, brak własnego salda. Rejestrowana jako `VIRTUAL` w payment-gateway, auto-aktywuje się w ciągu ~60s.
-- **Prepaid** — ma własne saldo w payment-gateway. Po rejestracji bank automatycznie przeprowadza kartę przez lifecycle (`REQUESTED → PRODUCING → SHIPPED → ACTIVE`) i kartę można od razu doładować (topup).
-
-**Przepływ płatności:**
-1. Klient przykłada kartę do terminala POS
-2. POS wywołuje autoryzację w payment-gateway → `APPROVED` / `DECLINED`
-3. Card-provider po max 30s (dev) / 24h (prod) wysyła settlement `POST /capture` do banku
-4. Bank zapisuje transakcję w historii konta
+| `INTEGRATIONS_CARDS_URL` | URL payment-gateway wewnątrz Docker | `http://cards_gateway_app:8000` |
+| `INTEGRATIONS_CARDS_URL_HOST` | URL z hosta (skrypty testowe) | `http://localhost:8072` |
+| `CARDS_API_KEY` | Klucz API banku do wystawiania i blokowania kart | `bank-key-us-a` |
+| `CARDS_HMAC_SECRET` | Sekret HMAC-SHA256 do podpisywania żądań | `secret-us-a-hmac` |
+| `CARDS_ADMIN_KEY` | Klucz admina (lifecycle prepaid, full-pan w testach) | `admin-secret-key-2026` |
 
 **Ograniczenia:**
-- Jedno aktywne konto może mieć max 1 aktywną kartę debitową i 1 aktywną prepaid
-- Konto junior może mieć wyłącznie kartę prepaid (max 1 aktywna)
-- Zablokowana karta może zostać odblokowana dopiero po 24h od zablokowania
-- Topup dostępny tylko dla kart prepaid w statusie `active`
+- Jedno aktywne konto: max 1 aktywna karta debitowa i 1 aktywna prepaid
+- Konto junior: wyłącznie prepaid (max 1 aktywna)
+- Zablokowana karta: odblokowanie dopiero po 24h od zablokowania
+- Topup: dostępny tylko dla kart prepaid w statusie `active`
+
+**Jak przetestować:** `bash scripts/verify-cards-integration.sh` — przy pierwszym uruchomieniu tworzy testową kartę prepaid (kolejne wywołania: idempotentne 409).
+
+---
 
 ### BLIK (integracja KLIK)
 
-Integracja z systemem **KLIK** (akademicki klon BLIK). Bank działa jako klient API KLIK
-i wystawia webhook do odbioru autoryzacji płatności.
+**Status:** zweryfikowane end-to-end na żywo (C2B: mock + real KLIK; P2P on-us i off-us przez FedNow)
+
+**Opis:** Integracja z systemem **KLIK** (akademicki klon BLIK). Bank działa jako klient API KLIK i wystawia webhook do odbioru autoryzacji płatności. W środowisku deweloperskim mock KLIK (port 6006) startuje automatycznie przez docker compose i obsługuje zarówno C2B jak i P2P.
 
 #### C2B — płatność kodem
 
-Klient generuje 6-cyfrowy kod BLIK w aplikacji banku i pokazuje go kasjerowi lub terminalowi.
-KLIK zarządza kodem i przesyła autoryzację do banku przez webhook.
+Klient generuje 6-cyfrowy kod BLIK i pokazuje go kasjerowi lub terminalowi. KLIK zarządza kodem i przesyła autoryzację do banku przez webhook.
 
-**Flow:**
-1. Klient klika „Generuj kod" → bank wywołuje `POST /api/v1/codes/generate` w KLIK → kod ważny 120s
-2. Klient pokazuje kod kasjerowi / terminalowi
-3. Terminal wywołuje inicjację w KLIK → KLIK wysyła webhook `POST /klik/webhook/authorize` do banku
-4. Bank natychmiast odpowiada `{received: true}` i pokazuje użytkownikowi modal z kwotą i sprzedawcą
-5. Użytkownik zatwierdza lub odrzuca → bank wywołuje `POST /api/v1/payments/confirm` w KLIK i obciąża konto (ACCEPTED) lub odrzuca (REJECTED)
+**Przepływ:** Generowanie kodu (`BlikService` → KLIK `POST /api/v1/codes/generate`, TTL 120s) → terminal inicjuje w KLIK → webhook `POST /klik/webhook/authorize` do banku → `{received: true}` + modal u użytkownika → zatwierdzenie/odrzucenie → `POST /api/v1/payments/confirm` + debit konta. Diagram → [Przepływ KLIK C2B (BPMN)](#przepływ-klik-c2b-bpmn).
+
+**Kluczowe pliki:**
+- `src/UsBankSystem.Api/Services/BlikService.cs`
+- `src/UsBankSystem.Api/Integrations/KlikApiClient.cs`
+- `src/UsBankSystem.Api/Controllers/BlikController.cs`
+- `src/UsBankSystem.Api/Controllers/KlikWebhookController.cs`
 
 Rozliczenie międzybankowe (fee: 1% KLIK + 0.5% terminal) przeprowadza KLIK — bank obciąża wyłącznie konto klienta.
 
-#### P2P — przelew na numer telefonu
+#### P2P on-us — odbiorca w tym samym banku
 
-Klient rejestruje numer telefonu jako alias swojego konta w systemie KLIK. Inni użytkownicy (z dowolnego banku zintegrowanego z KLIK) mogą wtedy przelać pieniądze, podając tylko numer telefonu odbiorcy.
+Klient rejestruje numer telefonu jako alias konta w KLIK. Przelew natychmiastowy przez lookup aliasu + porównanie routing number z własnym RTN banku.
 
-**Flow:**
-1. Klient rejestruje alias: `POST /accounts/{id}/phone-alias` → bank rejestruje alias w KLIK
-2. Nadawca inicjuje przelew: `POST /transfers/p2p` z numerem telefonu odbiorcy
-3. Bank sprawdza alias w KLIK (`GET /api/v1/aliases/lookup/{phone}`)
-4. Jeśli odbiorca jest w tym samym banku (routing number match) → przelew wewnętrzny (natychmiastowy)
-5. Jeśli odbiorca jest w innym banku → przelew zewnętrzny przez FedNow z rezerwacją salda
+**Przepływ:** `POST /transfers/p2p` → lookup aliasu KLIK → routing number = nasz RTN → debit nadawcy + credit odbiorcy → `Completed` natychmiast. Diagram → [Przepływ BLIK P2P on-us (BPMN)](#przepływ-blik-p2p-on-us-bpmn).
+
+**Kluczowe pliki (P2P):**
+- `src/UsBankSystem.Api/Services/PhoneAliasService.cs`
+- `src/UsBankSystem.Api/Integrations/KlikP2pClient.cs`
+- `src/UsBankSystem.Api/Controllers/P2pController.cs`
 
 #### P2P off-us — odbiorca w innym banku
 
-Gdy lookup aliasu w KLIK (`GET /api/v1/aliases/lookup/{phone}`) zwraca routing number innego banku niż nasz, przelew jest realizowany asynchronicznie przez kanał FedNow:
+Przelew asynchroniczny przez FedNow (pacs.008) po uzyskaniu routing number innego banku z lookupu KLIK.
 
-1. Bank rezerwuje saldo na koncie nadawcy
-2. Buduje komunikat pacs.008 z danymi odbiorcy z KLIK i wysyła go do FedSystems MQ
-3. Transfer otrzymuje status `Pending`
-4. FedNowPollingService odpytuje MQ o pacs.002 od banku odbiorcy
-5. pacs.002 ACCP → status `Completed`, saldo finalnie obciążone
-6. pacs.002 RJCT → status `Rejected`, rezerwacja zwolniona
+**Przepływ:** lookup KLIK → routing ≠ nasz → rezerwacja salda → pacs.008 przez FedNow MQ → pacs.002 ACCP/RJCT → `Completed`/`Rejected`. Wymaga aktywnej integracji FedNow. Diagram → [Przepływ BLIK P2P off-us przez FedNow (BPMN)](#przepływ-blik-p2p-off-us-przez-fednow-bpmn).
 
-**Wymagania:**
+Scenariusz zweryfikowany end-to-end z Leek Bank (RTN `010101012`) zarejestrowanym w instancji KLIK.
+
+**Konfiguracja:**
+
+| Zmienna | Opis | Przykład |
+|---|---|---|
+| `INTEGRATIONS_BLIK_URL` | URL KLIK wewnątrz Docker | `http://web:8000` |
+| `INTEGRATIONS_KLIK_API_KEY` | Klucz API KLIK | `klik_Aq79cfvR7OOtE9YORfuNMLJhjFCFe-BZL8nIUnQQoS4` |
+| `KLIK_WEBHOOK_SECRET` | Sekret nagłówka `X-Webhook-Secret` | `changeme_klik_webhook_secret` |
+| `KLIK_ALLOW_UNSIGNED_WEBHOOKS` | Akceptuj webhooki bez podpisu (dev) | `true` |
+
+**Wymagania P2P:**
 - Aktywna integracja FedNow (patrz sekcja [FedNow](#fednow-rtgs-via-fedsystems))
 - `p2p_enabled=True` dla naszego banku w panelu administracyjnym KLIK
-- Klucz API KLIK skonfigurowany w `docker-compose.override.yml` jako `Integrations__KlikApiKey`
 
-#### Ograniczenia funkcji BLIK
-- Konto junior nie ma dostępu do BLIK ani do P2P
-- Jedno aktywne konto może mieć max 1 aktywny alias telefoniczny
-- Numer telefonu w formacie E.164 dla strefy US (`+1` + 10 cyfr, np. `+15551234567`)
+**Ograniczenia:**
+- Konto junior: brak dostępu do BLIK i P2P
+- Jedno aktywne konto: max 1 aktywny alias telefoniczny
+- Numer telefonu: format E.164 dla US (`+1` + 10 cyfr, np. `+15551234567`)
 
-#### Znane ograniczenia
+**Jak przetestować:** `bash scripts/verify-blik-integration.sh` — health check KLIK, walidacja API key, dostępność webhooka `/klik/webhook/ping`. Read-only.
 
-P2P off-us (FedNow) został zweryfikowany end-to-end na żywo z drugim bankiem (Leek Bank,
-RTN 010101012) zarejestrowanym w instancji KLIK. Scenariusz obejmował lookup aliasu, routing
-pacs.008 przez FedSystems, dostarczenie do MQ drugiego banku oraz pacs.002 ACCP z powrotem.
-
-#### Konfiguracja KLIK
-
-```env
-INTEGRATIONS_BLIK_URL=http://localhost:6006      # dev: mock; prod: URL instancji KLIK
-INTEGRATIONS_KLIK_API_KEY=your_klik_api_key      # klucz API od operatora KLIK
-KLIK_WEBHOOK_SECRET=changeme_klik_webhook_secret  # nagłówek X-Webhook-Secret na /klik/webhook/*
-```
-
-W środowisku deweloperskim mock KLIK (port 6006) startuje automatycznie przez docker compose
-i obsługuje zarówno C2B (kod → webhook → confirm) jak i P2P (aliasy telefoniczne).
+---
 
 ### Konto junior
 
-Konto powiązane z kontem rodzica dla dzieci w wieku 7–13 lat.
+**Status:** zweryfikowane end-to-end na żywo
 
-- Każda transakcja inicjowana przez juniora trafia do statusu `pending_approval` i wymaga zatwierdzenia przez rodzica
-- Rodzic widzi listę oczekujących transakcji i może je zatwierdzić lub odrzucić
+**Opis:** Konto powiązane z kontem rodzica dla dzieci w wieku 7–13 lat. Każda transakcja inicjowana przez juniora trafia do statusu `pending_approval` i wymaga zatwierdzenia przez rodzica przed wykonaniem.
+
+**Przepływ:** Junior inicjuje przelew → `PaymentServiceBase.IsJuniorInitiatedAsync()` → `RequiresApproval = true`, `Status = pending_approval`, `ReservedBalance += amount`. Rodzic pobiera listę (`GET /transfers/pending-approval`) → zatwierdza lub odrzuca. Zatwierdzone przelewy wewnętrzne i RTP on-us wykonywane natychmiast; FedNow i RTP external — pacs.008 wysłany do systemu rozliczeniowego. ACH zewnętrzny nie może być zatwierdzony przez ten flow — rodzic musi wysłać przelew samodzielnie. Diagram → [Zatwierdzanie transakcji junior (BPMN)](#zatwierdzanie-transakcji-junior-bpmn).
+
+**Kluczowe pliki:**
+- `src/UsBankSystem.Api/Services/JuniorService.cs`
+- `src/UsBankSystem.Api/Services/TransferService.cs` (metody `ApproveAsync`, `RejectAsync`)
+- `src/UsBankSystem.Core/Entities/JuniorAccount.cs`
+
+**Ograniczenia:**
 - Junior może mieć jedną kartę prepaid z limitem dziennym i miesięcznym ustawianym przez rodzica
 - Topup karty juniora wykonuje rodzic
- 
+- BLIK i P2P niedostępne dla konta junior
+- ACH zewnętrzny juniora nie przechodzi przez flow zatwierdzania — rodzic musi wysłać bezpośrednio
+
 ---
 
 ## Diagramy
 
 ### Model domenowy (UML Class Diagram)
 
-> 📝 TODO (US-52) — diagram klas: User, Account, JuniorAccount, Transaction, Transfer, Card, BlikCode
-> Narzędzie: Mermaid lub draw.io
-
 ```mermaid
-%% TODO (US-52): Uzupełnić diagram modelu domenowego
 classDiagram
-    class User
-    class Account
-    class JuniorAccount
-    class Transaction
-    class Transfer
-    class Card
-    class BlikCode
+    class User {
+        +Guid Id
+        +string Email
+        +string FirstName
+        +string LastName
+        +string Status
+        +DateTime CreatedAt
+    }
+    class Account {
+        +Guid Id
+        +Guid UserId
+        +string AccountNumber
+        +string Type
+        +decimal Balance
+        +decimal ReservedBalance
+        +string Currency
+        +string Status
+    }
+    class JuniorAccount {
+        +Guid Id
+        +Guid AccountId
+        +Guid ParentUserId
+        +DateOnly DateOfBirth
+    }
+    class Transaction {
+        +Guid Id
+        +Guid AccountId
+        +decimal Amount
+        +string Type
+        +string Status
+        +string ReferenceId
+    }
+    class Transfer {
+        +Guid Id
+        +Guid FromAccountId
+        +decimal Amount
+        +string Currency
+        +string Channel
+        +string Status
+        +bool RequiresApproval
+        +Guid ApprovedBy
+    }
+    class Card {
+        +Guid Id
+        +Guid AccountId
+        +string Last4
+        +string Type
+        +string Status
+        +DateTime ExpiresAt
+        +decimal DailyLimit
+        +decimal MonthlyLimit
+    }
+    class BlikCode {
+        +Guid Id
+        +Guid AccountId
+        +string Code
+        +string Status
+        +DateTime ExpiresAt
+    }
+    class BlikAuthorization {
+        +Guid Id
+        +Guid AccountId
+        +decimal Amount
+        +string MerchantName
+        +string Status
+    }
+    class PhoneAlias {
+        +Guid Id
+        +Guid AccountId
+        +string Phone
+        +string KlikAliasId
+        +string Status
+    }
+    class ExchangeRate {
+        +string CurrencyCode
+        +decimal RateToUsd
+        +DateTime UpdatedAt
+    }
+
+    User "1" --> "*" Account : owns
+    Account "1" --> "*" Transaction : has
+    Account "1" --> "*" Transfer : from/to
+    Account "1" --> "*" Card : has
+    Account "1" --> "*" BlikCode : has
+    Account "1" --> "*" BlikAuthorization : has
+    Account "1" --> "*" PhoneAlias : has
+    JuniorAccount "1" --> "1" Account : wraps
+    JuniorAccount "*" --> "1" User : parentUser
 ```
 
 ### Przepływ przelewu ACH (BPMN)
@@ -340,9 +496,8 @@ flowchart TD
     API -->|2. Zapisuje transfer Pending| DB
     API -->|3. SendAsync| GW[AchGateway]
     GW -->|4. NextAsync — atomowy licznik| DB
-    GW -->|5. POST /json-to-ach| HELPER[ACH Helper :8310]
-    HELPER -->|NACHA bytes| GW
-    GW -->|6. Upload inbound/YYYYMMDD_XXX.ach| SFTP[FedSystems SFTP :2221]
+    GW -->|5. GenerateNachaFileAsync| NACHA[/Bajty NACHA/]
+    NACHA -->|"6. Upload inbound/{fileId}.ach"| SFTP[FedSystems SFTP :2221]
     SFTP -->|7. outbound/*.ack| POLL[AchPollingService]
     POLL -->|co 60s listuje outbound/| SFTP
     POLL -->|8. aktualizuje status| DB
@@ -354,9 +509,9 @@ flowchart TD
 1. `AchPaymentService` blokuje saldo na koncie nadawcy (`ReservedBalance += amount`)
 2. Transfer zapisywany z `Status = Pending`, `ExternalReferenceId = ComputeFileId(transferId)`
 3. `AchGateway.SendAsync` wywoływany synchronicznie w tym samym flow
-4. Atomowy counter w tabeli `AchDailyCounters` (PostgreSQL `INSERT ... ON CONFLICT DO UPDATE RETURNING`)
-5. JSON z detalami przelewu wysyłany do lokalnego serwisu pomocniczego, który zwraca gotowe bajty NACHA
-6. Plik NACHA uploadowany do FedSystems przez SFTP (SSH public-key auth)
+4. Atomowy counter w tabeli `AchDailyCounters` (`INSERT ... ON CONFLICT DO UPDATE RETURNING`)
+5. `AchGateway.GenerateNachaFileAsync()` buduje plik NACHA w pamięci (NACHA fixed-width records po 94 znaki) — bez zewnętrznych wywołań HTTP
+6. Plik NACHA uploadowany do FedSystems przez SFTP; nazwa: `inbound/{16-znakowy-hex-z-transferId}.ach`
 7. Po przetworzeniu FedSystems umieszcza `.ack` w `outbound/` — polling sprawdza co 60s
 8. Status transferu aktualizowany do `Completed` lub `Failed`, saldo debitowane lub zwalniane
 9. Przelewy przychodzące (`processed_*.ach`) → nowe transakcje na koncie odbiorcy
@@ -378,6 +533,14 @@ flowchart TD
     POLL -->|6. Aktualizacja statusu| DB
 ```
 
+**Legenda kroków:**
+1. `FedNowPaymentService` blokuje saldo na koncie nadawcy (`ReservedBalance += amount`)
+2. Transfer zapisywany z `Status = Pending`
+3. `Pacs008Builder.Build()` tworzy komunikat ISO 20022 pacs.008
+4. XML wysyłany do FedSystems MQ (`POST /send`)
+5. `FedNowPollingService` odpytuje FedSystems co 1s (`GET /FIFO/out`) i odbiera pacs.002 z wynikiem
+6. Status transferu aktualizowany: ACCP → `Completed` (saldo obciążone), RJCT → `Rejected` (rezerwacja zwolniona)
+
 **Przelew przychodzący (pacs.008 od innego banku):**
 
 ```mermaid
@@ -390,6 +553,13 @@ flowchart TD
     POLL -->|4. Transfer Completed| DB
     POLL -->|5. pacs.002 ACCP| MQ[POST /send → MQ]
 ```
+
+**Legenda kroków:**
+1. `FedNowPollingService` odpytuje FedSystems MQ co 1s (`GET /FIFO/out`) i odbiera pacs.008 od innego banku
+2. `Pacs008Parser.Parse()` wyciąga dane nadawcy, odbiorcy, kwotę i `EndToEndId`; waliduje RTN odbiorcy i sprawdza duplikat
+3. Saldo konta odbiorcy zwiększone o kwotę przelewu
+4. Transfer zapisany z `Status = Completed`, transakcja `Credit` dodana do historii
+5. `Pacs002Builder.Build()` wysyła odpowiedź ACCP do FedSystems MQ (`POST /send`)
 
 **Request-to-pay (pain.013 od KLIK):**
 
@@ -406,19 +576,15 @@ flowchart TD
     POLL -->|8. Transfer Completed| DB
 ```
 
-### Przepływ KLIK C2B (BPMN)
-
-```mermaid
-flowchart LR
-    A[POST /blik/generate] --> B[KLIK codes/generate]
-    B --> C[Kod 6-cyfrowy TTL 120s]
-    C --> D[Terminal skanuje kod]
-    D --> E[KLIK → webhook /authorize]
-    E --> F[Modal Approve/Reject]
-    F --> G["POST /blik/id/approve lub /reject"]
-    G --> H[KLIK payments/confirm]
-    H --> I[Debit konta / REJECTED]
-```
+**Legenda kroków:**
+1. `FedNowPollingService` odbiera pain.013 (request-to-pay) z KLIK przez FedSystems MQ
+2. `Pain013Parser.Parse()` wyciąga dane; walidacja konta odbiorcy i dostępności salda
+3. Saldo rezerwowane (`ReservedBalance += amount`), transfer zapisany z `Status = Pending`
+4. `Pacs014Builder.Build()` wysyła pain.014 z akceptacją do FedSystems MQ (potwierdzenie przyjęcia zlecenia)
+5. `Pacs008Builder.Build()` tworzy właściwy przelew ISO 20022
+6. pacs.008 wysyłany do banku KLIK przez FedSystems MQ
+7. FedSystems dostarcza pacs.002 potwierdzający ACCP (bank nadawcy potwierdził realizację)
+8. Transfer oznaczony `Status = Completed`, saldo skredytowane, rezerwacja zwolniona
 
 ### Przepływ przelewu RTP (BPMN)
 
@@ -463,7 +629,55 @@ flowchart TD
 2. Sprawdzenie duplikatu (`EndToEndId`), walidacja istnienia konta odbiorcy i statusu `active`
 3. Saldo konta odbiorcy zwiększone o kwotę przelewu
 4. Transfer zapisany z `Status = Completed`, transakcja typu `Credit` dodana do historii
-5. `Pacs002Builder.Build()` tworzy odpowiedź ACCP (lub RJCT jeśli konto nie istnieje) i wysyła przez `POST /transfers/settle`
+5. `Pacs002Builder.Build()` tworzy odpowiedź ACCP (lub RJCT jeśli konto nie istnieje)
+
+### Przepływ przelewu SWIFT (BPMN)
+
+**Przelew wychodzący:**
+
+```mermaid
+flowchart TD
+    U([Użytkownik]) -->|POST /transfers/swift| SVC[SwiftPaymentService]
+    SVC -->|1. Walidacja IBAN + BIC + USD| VAL[SwiftRequestValidator]
+    VAL --> SVC
+    SVC -->|2. Rezerwacja salda + Transfer Pending| DB[(PostgreSQL)]
+    SVC -->|3. Buduje pacs.008 XML + OAuth2 token| GW[SwiftGateway]
+    GW -->|4. POST /swift/message| MW[SWIFT Middleware]
+    MW -->|5. UETR| GW
+    GW --> SVC
+    MW -->|6. POST /transfers/swift/receive pacs.008| RCV[SwiftReceive endpoint]
+    RCV -->|7. Completed / Failed| DB
+```
+
+**Legenda kroków:**
+1. `SwiftRequestValidator.Validate()` — walidacja IBAN (checksum), BIC (format), waluta USD
+2. `ReservedBalance += amount`, Transfer z `Status = Pending`
+3. `SwiftGateway` uzyskuje OAuth2 token (client_credentials) i buduje pacs.008 z UETR (UUID)
+4. XML wysłany do SWIFT Middleware `POST /swift/message`
+5. Middleware zwraca UETR — unikalny identyfikator płatności w sieci SWIFT
+6. Po rozliczeniu (lub odrzuceniu) Middleware wywołuje `/transfers/swift/receive` z pacs.008 lub pacs.008 RETURN
+7. `TransferService.ProcessSwiftReceiveAsync`: `Completed` (saldo obciążone) lub `Failed` (rezerwacja zwolniona)
+
+**Przelew przychodzący:**
+
+```mermaid
+flowchart TD
+    MW[SWIFT Middleware] -->|POST /transfers/swift/receive pacs.008 XML| RCV[TransfersController]
+    RCV -->|1. Parse pacs.008| PRS[SwiftGateway.ParseIncoming]
+    PRS -->|UETR + kwota + waluta + CdtrAcct| RCV
+    RCV -->|2. Szukaj UETR w DB| DB[(PostgreSQL)]
+    DB -->|transfer nie istnieje = prawdziwy incoming| RCV
+    RCV -->|3. Lookup ExchangeRates| DB
+    RCV -->|4. Balance += kwota × kurs USD| DB
+    RCV -->|5. Transfer + Transaction Completed| DB
+```
+
+**Legenda kroków:**
+1. `SwiftGateway.ParseIncoming()` — wyciąga UETR, `IntrBkSttlmAmt[@Ccy]` (kwota + waluta), `CdtrAcct/Id/Othr/Id` (numer konta odbiorcy)
+2. Idempotency: jeśli UETR już istnieje w DB — pominięcie (duplicate delivery)
+3. Lookup kursu w tabeli `ExchangeRates` — obsługiwane: EUR, GBP, CHF, JPY, PLN i inne waluty ISO 4217
+4. Konwersja: `amountUsd = round(amount × rateToUsd, 2)`, `Account.Balance += amountUsd`
+5. Nowy Transfer (`Channel = swift`, `Status = Completed`) + Transaction (`Type = Credit`) zapisane w DB
 
 ### Przepływ karty płatniczej (BPMN)
 
@@ -515,6 +729,35 @@ flowchart TD
 6. Settlement webhook `POST /capture` po autoryzacji
 7. **Karta prepaid:** transakcja zapisana w historii konta, ale `Account.Balance` **nie jest zmniejszane** — środki zostały już odjęte z salda prepaid w momencie autoryzacji
 
+### Przepływ KLIK C2B (BPMN)
+
+```mermaid
+flowchart TD
+    U([Użytkownik]) -->|1. POST /blik/generate| SVC[BlikService]
+    SVC -->|2. POST /api/v1/codes/generate| KLIK[KLIK API]
+    KLIK -->|kod 6-cyfrowy TTL 120s| SVC
+    SVC -->|3. kod wyświetlony klientowi| U
+    U -->|pokazuje kod terminalowi| POS([Terminal POS])
+    POS -->|4. inicjacja w KLIK| KLIK
+    KLIK -->|5. POST /klik/webhook/authorize| WH[KlikWebhookController]
+    WH -->|received: true| KLIK
+    WH -->|6. modal z kwotą i sprzedawcą| U
+    U -->|7. POST /blik/id/approve lub /reject| SVC
+    SVC -->|8. POST /api/v1/payments/confirm ACCEPTED/REJECTED| KLIK
+    SVC -->|9. Balance -= kwota lub brak zmian| DB[(PostgreSQL)]
+```
+
+**Legenda kroków:**
+1. `BlikService` wywołuje KLIK `POST /api/v1/codes/generate` z `accountId`
+2. KLIK zwraca 6-cyfrowy kod ważny 120 sekund
+3. Kod wyświetlany klientowi w aplikacji banku
+4. Terminal skanuje kod i inicjuje transakcję w KLIK
+5. KLIK wysyła webhook `POST /klik/webhook/authorize` z kwotą i `merchantName` — bank odpowiada `{received: true}`
+6. Bank wyświetla modal potwierdzający z danymi transakcji
+7. Klient zatwierdza (`approve`) lub odrzuca (`reject`)
+8. `POST /api/v1/payments/confirm` z wynikiem ACCEPTED/REJECTED do KLIK
+9. Przy ACCEPTED: `Account.Balance -= amount`, zapis transakcji. Fee: 1% KLIK + 0.5% terminal — potrącane przez KLIK, nie przez bank
+
 ### Przepływ BLIK P2P on-us (BPMN)
 
 ```mermaid
@@ -557,28 +800,46 @@ flowchart TD
 1. `KlikP2pClient.LookupAliasAsync(phone)` — KLIK zwraca routing number i numer konta odbiorcy w innym banku
 2. Saldo nadawcy zablokowane (`ReservedBalance += amount`)
 3. Transfer zapisany ze statusem `Pending`
-4. `Pacs008Builder.Build()` — komunikat ISO 20022 z danymi z lookupu KLIK: `CreditorBankRtn` = routing number, `CreditorAccountNumber` = numer konta. `CreditorBankName` ustawiane jako `"Unknown Bank"` (KLIK nie zwraca nazwy banku — brak lookupa RTN→nazwa, analogicznie jak w FedNow)
+4. `Pacs008Builder.Build()` — komunikat ISO 20022 z danymi z lookupu KLIK: `CreditorBankRtn` = routing number, `CreditorAccountNumber` = numer konta. `CreditorBankName` ustawiane jako `"Unknown Bank"` (KLIK nie zwraca nazwy banku)
 5. Komunikat wysłany do FedSystems MQ — FedSystems doręcza go do banku odbiorcy
 6. Bank odbiorcy przetwarza przelew i odsyła pacs.002 (ACCP = przyjęty, RJCT = odrzucony)
 7. ACCP → `Completed`, saldo finalnie obciążone; RJCT → `Rejected`, rezerwacja zwolniona
 
-### Przepływ zatwierdzania transakcji junior (BPMN)
-
-> 📝 TODO (US-54) — diagram przepływu: transakcja pending → powiadomienie rodzica → approve/reject
+### Zatwierdzanie transakcji junior (BPMN)
 
 ```mermaid
-%% TODO (US-54): Uzupełnić diagram BPMN zatwierdzania transakcji junior
-flowchart LR
-    A[Transakcja junior] --> B[Status: pending_approval]
-    B --> C[Rodzic zatwierdza / odrzuca]
-    C --> D[Wykonanie / anulowanie]
+flowchart TD
+    J([Junior]) -->|POST /transfers/* np. /fednow /rtp| SVC[PaymentServiceBase]
+    SVC -->|1. IsJuniorInitiatedAsync| DB[(PostgreSQL)]
+    DB -->|konto juniora potwierdzone| SVC
+    SVC -->|2. ReservedBalance += kwota| DB
+    SVC -->|3. Transfer Status = pending_approval| DB
+    P([Rodzic]) -->|4. GET /transfers/pending-approval| LIST[TransfersController]
+    LIST -->|lista oczekujących przelewów juniora| P
+    P -->|5a. POST /transfers/id/approve| APPR[TransferService.ApproveAsync]
+    APPR -->|6. weryfikacja uprawnień + sprawdzenie salda| DB
+    APPR -->|internal / RTP on-us: Completed natychmiast| DB
+    APPR -->|FedNow / RTP external: pacs.008 → MQ / TCH| EXT[FedNow MQ / TCHSystems]
+    EXT -->|pacs.002 → Transfer Completed| DB
+    P -->|5b. POST /transfers/id/reject| REJ[TransferService.RejectAsync]
+    REJ -->|7. ReservedBalance -= kwota, Status = Rejected| DB
 ```
- 
+
+**Legenda kroków:**
+1. `PaymentServiceBase.IsJuniorInitiatedAsync()` — sprawdza czy konto należy do juniora w DB
+2. Saldo zablokowane — `ReservedBalance += amount`
+3. Transfer zapisany z `Status = pending_approval`, `RequiresApproval = true`
+4. Rodzic pobiera listę oczekujących przelewów swojego juniora (filtr po `JuniorAccounts.ParentUserId`)
+5a. `TransferService.ApproveAsync` — weryfikacja że rodzic jest właścicielem + sprawdzenie dostępnego salda
+5b. `TransferService.RejectAsync` — weryfikacja uprawnień rodzica
+6. Dla przelewów wewnętrznych i RTP on-us: natychmiastowe obciążenie/uznanie kont → `Completed`. Dla FedNow i RTP zewnętrznego: pacs.008 wysłany do systemu rozliczeniowego → `Pending` do czasu pacs.002
+7. Odrzucenie: rezerwacja zwolniona, transfer odrzucony. **ACH zewnętrzny nie może przejść przez ten flow** — rodzic musi wysłać przelew samodzielnie przez `/transfers/ach`
+
 ---
 
 ## Konfiguracja sesji płatności
 
-Plik `src/UsBankSystem.Api/payment-config.json` pozwala konfigurować parametry czasowe systemów płatności. W środowisku deweloperskim skracasz wartości żeby testować integracje bez czekania na prawdziwe okna czasowe.
+Plik `src/UsBankSystem.Api/payment-config.json` zawiera **parametry operacyjne** (timeouty, okna batch). Tożsamość banku (BankRtn, BankCode, BankLegalName) konfigurowana jest **wyłącznie przez zmienne środowiskowe** — domyślne wartości w kodzie C# (`PaymentSessionConfig.cs`) to `040104018` / `baguette-bank`.
 
 ```json
 {
@@ -588,7 +849,8 @@ Plik `src/UsBankSystem.Api/payment-config.json` pozwala konfigurować parametry 
       "CutoffHour": 23
     },
     "FedNow": {
-      "TimeoutSeconds": 10
+      "TimeoutSeconds": 30,
+      "PollIntervalSeconds": 1
     },
     "Rtp": {
       "TimeoutSeconds": 10
@@ -605,14 +867,20 @@ Wartości produkcyjne:
 - FedNow timeout: 20s
 - RTP timeout: 10s
 - SWIFT: 1-5 dni roboczych
+
 ---
 
 ## Uruchomienie
 
 ### Wymagania
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (lub Docker Engine + Compose plugin)
-- [Git](https://git-scm.com/)
+| System | Narzędzia |
+|---|---|
+| **macOS** | [Docker Desktop](https://www.docker.com/products/docker-desktop/) lub [Colima](https://github.com/abiosoft/colima) + Docker CLI + Compose plugin, [Git](https://git-scm.com/) |
+| **Windows** | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [Git for Windows](https://gitforwindows.org/) (zawiera Git Bash) |
+| **Linux** | Docker Engine + [Compose plugin](https://docs.docker.com/compose/install/linux/), Git |
+
+> **Windows:** Skrypty `.sh` (testy, verify-*) wymagają **Git Bash** lub **WSL2**. PowerShell nie obsługuje `source .env`. Projekt zawiera `.gitattributes` wymuszający LF w skryptach — `git clone` automatycznie zachowa poprawne zakończenia linii.
 
 ### Krok 1 — Klonowanie repo
 
@@ -623,67 +891,40 @@ cd us-bank-system
 
 ### Krok 2 — Konfiguracja zmiennych środowiskowych
 
-Skopiuj szablon i uzupełnij swoimi danymi:
-
 ```bash
-cp .env.example .env
+cp .env.example .env          # macOS / Linux / Git Bash
+# copy .env.example .env      # Windows CMD
 ```
 
-Otwórz `.env` i uzupełnij:
+Plik `.env.example` zawiera komentarze przy każdej zmiennej, pogrupowane sekcjami. Minimalne zmiany do uruchomienia:
 
 ```env
-POSTGRES_DB=usbank               # nazwa bazy — zostaw bez zmian
-POSTGRES_USER=twoj_user          # dowolna nazwa użytkownika bazy
-POSTGRES_PASSWORD=twoje_haslo
-POSTGRES_PORT=5433               # port na hoście (5433 jeśli lokalny postgres zajmuje 5432)
-FRONTEND_PORT=3000               # port frontendu — kontroluje Docker i CORS jednocześnie
-API_URL=http://localhost:5100    # adres API — używany przez frontend
-JWT_SECRET=min_32_znaki          # dowolny ciąg min. 32 znaków
-WEBHOOK_SECRET=dowolny_sekret    # używany przez mock gateway do wysyłania webhooków
-INTEGRATIONS_ACH_URL=http://localhost:6001
-INTEGRATIONS_RTP_URL=http://localhost:6002
-INTEGRATIONS_FEDNOW_URL=http://localhost:6003
-INTEGRATIONS_SWIFT_URL=http://localhost:6004
-INTEGRATIONS_CARDS_URL=http://payment-gateway:8000   # adres payment-gateway w sieci Docker
-INTEGRATIONS_BLIK_URL=http://localhost:6006           # dev: mock KLIK; prod: URL instancji KLIK
-INTEGRATIONS_KLIK_API_KEY=your_klik_api_key           # klucz API KLIK — wymagany w prod
-KLIK_WEBHOOK_SECRET=dowolny_sekret                    # zabezpieczenie webhooka /klik/webhook/*
-CARDS_API_KEY=bank-key-us-a
-CARDS_HMAC_SECRET=secret-us-a-hmac
-CARDS_ADMIN_KEY=admin-secret-key-2026
-
-# ACH / FedSystems SFTP
-Ach__RoutingNumber=110000000          # nasz RTN (9 cyfr)
-Ach__LegalName=US Bank A             # nazwa banku w nagłówku NACHA
-Ach__FrbRoutingNumber=090000515      # RTN Fed Reserve Bank (RDFI)
-Ach__FrbName=FRB Tungsten            # nazwa RDFI
-Ach__Sftp__Host=fedsystems.example   # hostname serwera SFTP FedSystems
-Ach__Sftp__Port=2221                 # port SFTP
-Ach__Sftp__Username=us-bank-a        # login SFTP
-Ach__Sftp__PrivateKeyPath=sftp_keys/id_rsa   # ścieżka do klucza prywatnego SSH
-Ach__Sftp__HostFingerprint=          # SHA256 fingerprint serwera (zabezpieczenie przed MITM)
+POSTGRES_PASSWORD=twoje_haslo          # dowolne — baza lokalna
+JWT_SECRET=min_32_znaki_dowolny_ciag   # dowolny ciąg min. 32 znaków
 ```
 
-> `FRONTEND_PORT` to jedyne miejsce gdzie ustawiasz port frontendu — `docker-compose.yaml` używa go zarówno do mapowania portów jak i do konfiguracji CORS w API.
+Reszta ma sensowne domyślne wartości deweloperskie. Pełny opis zmiennych — patrz `.env.example`.
+
+> `FRONTEND_PORT` kontroluje zarówno port frontendu w Docker jak i CORS w API — ustaw raz, działa wszędzie.
 
 > Plik `.env` jest wykluczony z gita — nie commituj go.
 
-### Krok 3 — Konfiguracja Ridera
+### Krok 3 — Konfiguracja IDE (opcjonalne)
 
-Skopiuj szablon `launchSettings.json`:
+Tylko jeśli uruchamiasz API bezpośrednio z IDE (bez Dockera):
 
 ```bash
 cp src/UsBankSystem.Api/Properties/launchSettings.template.json src/UsBankSystem.Api/Properties/launchSettings.json
 ```
 
-Otwórz `launchSettings.json` i uzupełnij wartości w profilu `http` danymi z `.env`:
+Uzupełnij wartości w profilu `http` danymi z `.env`:
 
 ```json
-"ConnectionStrings__Default": "Host=localhost;Port=5433;Database=usbank;Username=POSTGRES_USER;Password=POSTGRES_PASSWORD",
+"ConnectionStrings__Default": "Host=localhost;Port=5999;Database=usbank;Username=POSTGRES_USER;Password=POSTGRES_PASSWORD",
 "Jwt__Secret": "JWT_SECRET"
 ```
 
-> Plik `launchSettings.json` jest wykluczony z gita — nie commituj go.
+> Plik `launchSettings.json` jest wykluczony z gita.
 
 ### Krok 4 — Uruchomienie
 
@@ -691,27 +932,43 @@ Otwórz `launchSettings.json` i uzupełnij wartości w profilu `http` danymi z `
 docker compose up --build
 ```
 
-Pierwsze uruchomienie pobiera obrazy i buduje kontenery — może potrwać kilka minut.
+Pierwsze uruchomienie pobiera obrazy i buduje kontenery — może potrwać kilka minut. Migracje bazy danych aplikują się automatycznie przy starcie.
 
-> `docker compose up` odpala też mock gateway automatycznie jako osobny serwis — nie trzeba nic robić ręcznie.
+> Mock gateway (ACH/RTP/FedNow/SWIFT/KLIK) startuje automatycznie jako osobny serwis.
 
-Aplikacja dostępna pod:
+**Force rebuild** (po zmianach w Dockerfile lub zależnościach):
 
-| Serwis | URL |
-|---|---|
-| Frontend | http://localhost:3000 |
-| API | http://localhost:5100 |
-| Swagger UI | http://localhost:5100/swagger |
-| Health check | http://localhost:5100/health |
-| Mock KLIK C2B+P2P | http://localhost:6006 |
+```bash
+docker compose build --no-cache && docker compose up
+```
 
-> Jeśli uruchamiasz razem z projektem **Karty-Platnicze-Aplikacje-Biznesowe**, po każdym `docker compose up` w us-bank-system musisz podłączyć kontener banku do sieci payment-gatewaya, żeby settlement działał:
->
-> ```bash
-> docker network connect cards-backend us-bank-a
-> ```
->
-> Bez tego card-provider nie może wysłać callbacku `/capture` do banku i transakcje kartowe nie pojawią się w historii konta. Patrz sekcja [Integracja z Karty-Platnicze](#integracja-z-karty-platnicze).
+#### Serwisy dostępne po uruchomieniu
+
+| Serwis | URL | Wymaga systemu siostrzanego? |
+|---|---|---|
+| Frontend | http://localhost:3100 | — |
+| API | http://localhost:5100 | — |
+| Swagger UI | http://localhost:5100/swagger | — |
+| Health check | http://localhost:5100/health | — |
+| Mock ACH | http://localhost:6001 | — |
+| Mock RTP | http://localhost:6002 | — |
+| Mock FedNow | http://localhost:6003 | — |
+| Mock SWIFT | http://localhost:6004 | — |
+| Mock KLIK C2B+P2P | http://localhost:6006 | — |
+
+#### Serwisy wymagające uruchomienia projektów siostrzanych
+
+| Serwis | URL z hosta | Projekt |
+|---|---|---|
+| FedSystems SFTP | localhost:2221 | `payment-settlement-systems/FedSystems` |
+| FedNow MQ | http://localhost:8770 | `payment-settlement-systems/FedSystems` |
+| FedNow Central | http://localhost:8514 | `payment-settlement-systems/FedSystems` |
+| TCHSystems RTP | http://localhost:8200 | `payment-settlement-systems/TCHSystems` |
+| SWIFT Middleware | http://localhost:3000 | `SWIFT-Aplikacje-Biznesowe` |
+| Payment Gateway (karty) | http://localhost:8072 | `Karty-Platnicze-Aplikacje-Biznesowe` |
+| KLIK (real) | http://localhost:8000 | `KLIK-payments` |
+
+> Po uruchomieniu us-bank-system razem z **Karty-Platnicze-Aplikacje-Biznesowe** wymagana jest dodatkowa konfiguracja sieci Docker — patrz sekcja [Integracja z Karty-Platnicze](#integracja-z-karty-platnicze).
 
 ### Zatrzymanie aplikacji
 
@@ -781,6 +1038,7 @@ Pełna dokumentacja dostępna przez Swagger UI pod `/swagger` po uruchomieniu ap
 | POST | /transfers/rtp | Przelew RTP (real-time) |
 | POST | /transfers/fednow | Przelew FedNow (RTGS) |
 | POST | /transfers/swift | Przelew SWIFT (międzynarodowy) |
+| POST | /transfers/swift/receive | Webhook przychodzący od SWIFT Middleware (`X-SWIFT-Message-Type`, `X-SWIFT-UETR`) |
 | GET | /transfers | Lista przelewów użytkownika |
 | GET | /transfers/{id}/status | Status przelewu |
 | GET | /transfers/pending-approval | Przelewy juniora czekające na zatwierdzenie |
@@ -826,28 +1084,26 @@ Pełna dokumentacja dostępna przez Swagger UI pod `/swagger` po uruchomieniu ap
 
 ## Integracje zewnętrzne
 
-Projekt integruje się z modułami tworzonymi przez inne grupy. Adresy konfigurowane przez zmienne środowiskowe w `.env`:
+Projekt integruje się z modułami tworzonymi przez inne grupy. Adresy konfigurowane przez zmienne środowiskowe w `.env` (pełna lista z komentarzami — patrz `.env.example`):
 
 ```
-INTEGRATIONS_ACH_URL=http://ach-module
-INTEGRATIONS_RTP_URL=http://rtp-module
-INTEGRATIONS_FEDNOW_URL=http://fednow-module
-INTEGRATIONS_SWIFT_URL=http://swift-module
-INTEGRATIONS_CARDS_URL=http://cards-module
-INTEGRATIONS_BLIK_URL=http://klik-module      # adres KLIK API (mock: http://localhost:6006)
-INTEGRATIONS_KLIK_API_KEY=twoj_api_key        # klucz API od operatora KLIK
-KLIK_WEBHOOK_SECRET=opcjonalny_sekret         # nagłówek X-Webhook-Secret na /klik/webhook/*
+INTEGRATIONS_RTP_TCH_URL=http://host.docker.internal:8200   # TCHSystems RTP
+INTEGRATIONS_FEDNOW_MQ_URL=http://host.docker.internal:8770 # FedSystems MQ
+INTEGRATIONS_SWIFT_URL=http://host.docker.internal:3000      # SWIFT Middleware (real, nie mock 6004)
+INTEGRATIONS_CARDS_URL=http://cards_gateway_app:8000          # Karty-Platnicze w sieci Docker
+INTEGRATIONS_BLIK_URL=http://web:8000                         # KLIK w sieci Docker (mock: http://mock-gateways:6006)
+INTEGRATIONS_KLIK_API_KEY=twoj_api_key                        # klucz API od operatora KLIK
+KLIK_WEBHOOK_SECRET=opcjonalny_sekret                         # nagłówek X-Webhook-Secret na /klik/webhook/*
 ```
 
 **mock stub** (`UsBankSystem.MockGateways`):
 
 | Kanał | Port | Zachowanie |
 |---|---|---|
-| ACH helper | 8310 | Konwertuje JSON z detalami przelewu → plik NACHA (`POST /json-to-ach`). Wymagany lokalnie. |
-| FedSystems SFTP | 2221 | Prawdziwy serwer SFTP — upload w `inbound/`, polling `outbound/` co 60s |
+| ACH | 6001 | Mock async: akceptuje `POST /transfers`, odpowiada referenceId i wysyła webhook po opóźnieniu (AchGateway generuje NACHA i uploaduje do SFTP bezpośrednio — nie korzysta z tego mocka) |
 | RTP | 6002 | Mock: czeka kilka sekund i odpowiada synchronicznie `Completed` |
 | FedNow | 6003 | Mock: tak samo jak RTP |
-| SWIFT | 6004 | Mock: odpowiada natychmiast, webhook po dłuższym czasie |
+| SWIFT | 6004 | Mock: odpowiada natychmiast, webhook po dłuższym czasie. **Real SWIFT Middleware działa na porcie 3000.** |
 | KLIK C2B+P2P | 6006 | Mock KLIK: kody C2B (TTL 120s), symulacja terminala (`POST /simulate/initiate`), potwierdzenia z fee 1%+0.5%, aliasy P2P (register/lookup/delete) |
 
 Czasy opóźnień dla mock stubów (RTP/FedNow/SWIFT) są brane z `payment-config.json`.
@@ -998,7 +1254,7 @@ Projekt zawiera skrypty do testowania przepływu end-to-end przez curl.
 ### Happy path — pełny przepływ
 
 ```bash
-bash test-flow.sh
+bash scripts/test-flow.sh
 ```
 
 Skrypt wykonuje: rejestrację użytkownika → login → utworzenie konta → rejestrację karty debitowej i prepaid → topup prepaid → płatność przez POS → zablokowanie karty debitowej. Na końcu wypisuje tokeny kart.
@@ -1006,7 +1262,7 @@ Skrypt wykonuje: rejestrację użytkownika → login → utworzenie konta → re
 ### Edge cases
 
 ```bash
-bash test-edge-cases.sh
+bash scripts/test-edge-cases.sh
 ```
 
 Pokrywa 25 przypadków brzegowych:
@@ -1023,9 +1279,23 @@ Pokrywa 25 przypadków brzegowych:
 | POS | Zablokowana karta → DECLINED, zły CVV → DECLINED, błędny PAN (Luhn) → 422 |
 | No-auth | Brak tokenu JWT → 401 |
 
+### Komprehensywny test API
+
+```bash
+bash scripts/test-api.sh
+```
+
+Testuje wszystkie endpointy systemu (auth, konta, przelewy, karty, BLIK, P2P, SWIFT, junior). Wymaga uruchomionego środowiska z systemami siostrzanymi. Wczytuje `.env` automatycznie. Sekcja 15 — test SWIFT wychodzącego i webhooka z poprawnym/błędnym sekretem.
+
+```bash
+bash scripts/test-cards-full.sh
+```
+
+Pełny test kart płatniczych (happy path + edge case): nowe konto testowe, karta debitowa i prepaid, topup, płatność przez POS, settlement webhook.
+
 ### Skrypty weryfikacyjne integracji
 
-Pięć skryptów do weryfikacji łączności z systemami partnerskimi. Każdy wymaga `.env` z odpowiednimi sekretami. Bezpieczne do wielokrotnego uruchamiania.
+Sześć skryptów do weryfikacji łączności z systemami partnerskimi. Każdy wymaga `.env` z odpowiednimi sekretami. Bezpieczne do wielokrotnego uruchamiania.
 
 | Skrypt | Co sprawdza | System partnerski | Uwagi |
 |---|---|---|---|
@@ -1034,8 +1304,9 @@ Pięć skryptów do weryfikacji łączności z systemami partnerskimi. Każdy wy
 | `verify-fednow-integration.sh` | Łączność z MQ FedSystems, rejestracja banku w FedNow Central | FedSystems FedNow (VanillaMile) | Read-only — nie wysyła komunikatów |
 | `verify-rtp-integration.sh` | Łączność z TCHSystems, walidacja X-Api-Key (poprawny + celowo błędny) | TCHSystems RTP (VanillaMile) | Read-only — nie tworzy przelewów |
 | `verify-blik-integration.sh` | Health check KLIK, walidacja API key, dostępność webhooka `/klik/webhook/ping` | KLIK P2P (MarshallBjorn) | Read-only — lookup z dummy phone (+00000000000 → oczekiwane 404) |
+| `verify-swift-integration.sh` | OAuth2 token, wysłanie pacs.008, webhook z poprawnym i celowo błędnym `X-SWIFT-Webhook-Secret` | SWIFT Middleware (Jkwasnyy) | Wymaga działającego SWIFT Middleware na porcie 3000 |
 
-System przeszedł pełną rundę testów end-to-end łączącą wszystkie integracje w jednym scenariuszu klienta (FedNow przychodzący → karta → BLIK P2P → ACH wychodzący → weryfikacja salda).
+System przeszedł pełną rundę testów end-to-end łączącą wszystkie integracje w jednym scenariuszu klienta (FedNow przychodzący → karta → BLIK P2P → ACH wychodzący → SWIFT wychodzący → weryfikacja salda co do centa).
 
 ---
 
@@ -1081,13 +1352,13 @@ git checkout -b feature/US-XX-krotki-opis
 ## Dokumentacja
 
 - [Backlog — Trello](https://trello.com/b/SoYXGs0x/tablica-projektowa)
-- [Swagger UI](http://localhost:5000/swagger) — po uruchomieniu aplikacji
+- [Swagger UI](http://localhost:5100/swagger) — po uruchomieniu aplikacji
 
 ---
 
 ## Zespół
 
-| Osoba | Zakres                                                |
-|---|-------------------------------------------------------|
-| [Piotr Gorzkiewicz](https://github.com/g0rzki) | Backend core, przelewy zewnętrzne, konto junior, BLIK |
-| [Jakub Siłka](https://github.com/jakub7038) | Auth, frontend, karty, SWIFT                          |
+| Osoba | Zakres |
+|---|---|
+| [Piotr Gorzkiewicz](https://github.com/g0rzki) | Backend core, BLIK, FedNow, RTP |
+| [Jakub Siłka](https://github.com/jakub7038) | Frontend, konto junior, SWIFT, karty, ACH |

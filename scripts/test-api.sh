@@ -6,7 +6,7 @@
 set -uo pipefail
 
 # Załaduj .env jeśli istnieje (strip \r dla Windows CRLF; obsłuż wartości ze spacją)
-if [ -f "$(dirname "$0")/.env" ]; then
+if [ -f "$(dirname "$0")/../.env" ]; then
   while IFS= read -r line; do
     line="${line//$'\r'/}"
     [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
@@ -14,7 +14,7 @@ if [ -f "$(dirname "$0")/.env" ]; then
     key="${line%%=*}"
     value="${line#*=}"
     export "$key=$value"
-  done < "$(dirname "$0")/.env"
+  done < "$(dirname "$0")/../.env"
 fi
 
 BASE_URL="${1:-${API_URL:-http://localhost:5100}}"
@@ -113,7 +113,7 @@ ACH_URL="${INTEGRATIONS_ACH_URL:-http://localhost:8310}"
 CARDS_URL="${INTEGRATIONS_CARDS_URL_HOST:-${INTEGRATIONS_CARDS_URL:-http://localhost:8072}}"
 RTP_URL="${INTEGRATIONS_RTP_URL:-http://localhost:6002}"
 FEDNOW_URL="${INTEGRATIONS_FEDNOW_URL:-http://localhost:6003}"
-SWIFT_URL="${INTEGRATIONS_SWIFT_URL:-http://localhost:3000}"
+SWIFT_URL=$(echo "${INTEGRATIONS_SWIFT_URL:-http://localhost:3000}" | sed 's|host.docker.internal|localhost|')
 SFTP_HOST="${Ach__Sftp__Host:-localhost}"
 SFTP_PORT="${Ach__Sftp__Port:-2221}"
 
@@ -1068,7 +1068,7 @@ SWIFT_BIC_UK="UKBKGB01XXX"; SWIFT_IBAN_UK="GB29NWBK60161331926819"
 SWIFT_IBAN_CLOSED_UK="GB00CLOSED0000000000000000"
 SWIFT_TR_ID=""; SWIFT_UETR=""
 
-SWIFT_GW_URL="${INTEGRATIONS_SWIFT_URL:-http://localhost:3000}"
+SWIFT_GW_URL=$(echo "${INTEGRATIONS_SWIFT_URL:-http://localhost:3000}" | sed 's|host.docker.internal|localhost|')
 SWIFT_GW_UP=false
 if http_up "${SWIFT_GW_URL}"; then
   ok "SWIFT Middleware (${SWIFT_GW_URL}) — dostępny"
@@ -1311,7 +1311,7 @@ xml_post() {
   code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST \
     -H "Content-Type: application/xml" \
     -H "X-SWIFT-Webhook-Secret: ${SWIFT_WEBHOOK_SECRET}" \
-    "${args[@]}" \
+    ${args[@]+"${args[@]}"} \
     -d "${xml}" \
     "${RECEIVE_URL}" 2>/dev/null) || code="000"
   local b; b=$(cat "$tmp"); rm -f "$tmp"

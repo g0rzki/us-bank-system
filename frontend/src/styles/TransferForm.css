@@ -150,3 +150,16 @@
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+.tf-hint-warn {
+    font-size: 0.75rem;
+    color: #e8a020;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.tf-field input.warn,
+.tf-field select.warn {
+    border-color: #e8a020;
+}
