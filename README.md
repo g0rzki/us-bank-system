@@ -496,9 +496,8 @@ flowchart TD
     API -->|2. Zapisuje transfer Pending| DB
     API -->|3. SendAsync| GW[AchGateway]
     GW -->|4. NextAsync — atomowy licznik| DB
-    GW -->|5. POST /json-to-ach| HELPER[ACH Helper :8310]
-    HELPER -->|NACHA bytes| GW
-    GW -->|6. Upload inbound/YYYYMMDD_XXX.ach| SFTP[FedSystems SFTP :2221]
+    GW -->|5. GenerateNachaFileAsync| NACHA[/Bajty NACHA/]
+    NACHA -->|6. Upload inbound/{fileId}.ach| SFTP[FedSystems SFTP :2221]
     SFTP -->|7. outbound/*.ack| POLL[AchPollingService]
     POLL -->|co 60s listuje outbound/| SFTP
     POLL -->|8. aktualizuje status| DB
@@ -511,8 +510,8 @@ flowchart TD
 2. Transfer zapisywany z `Status = Pending`, `ExternalReferenceId = ComputeFileId(transferId)`
 3. `AchGateway.SendAsync` wywoływany synchronicznie w tym samym flow
 4. Atomowy counter w tabeli `AchDailyCounters` (`INSERT ... ON CONFLICT DO UPDATE RETURNING`)
-5. JSON z detalami przelewu wysyłany do ACH Helper, który zwraca gotowe bajty NACHA
-6. Plik NACHA uploadowany do FedSystems przez SFTP (SSH public-key auth)
+5. `AchGateway.GenerateNachaFileAsync()` buduje plik NACHA w pamięci (NACHA fixed-width records po 94 znaki) — bez zewnętrznych wywołań HTTP
+6. Plik NACHA uploadowany do FedSystems przez SFTP; nazwa: `inbound/{16-znakowy-hex-z-transferId}.ach`
 7. Po przetworzeniu FedSystems umieszcza `.ack` w `outbound/` — polling sprawdza co 60s
 8. Status transferu aktualizowany do `Completed` lub `Failed`, saldo debitowane lub zwalniane
 9. Przelewy przychodzące (`processed_*.ach`) → nowe transakcje na koncie odbiorcy
@@ -533,6 +532,14 @@ flowchart TD
     POLL -->|co 1s GET /FIFO/out| FS
     POLL -->|6. Aktualizacja statusu| DB
 ```
+
+**Legenda kroków:**
+1. `FedNowPaymentService` blokuje saldo na koncie nadawcy (`ReservedBalance += amount`)
+2. Transfer zapisywany z `Status = Pending`
+3. `Pacs008Builder.Build()` tworzy komunikat ISO 20022 pacs.008
+4. XML wysyłany do FedSystems MQ (`POST /send`)
+5. `FedNowPollingService` odpytuje FedSystems co 1s (`GET /FIFO/out`) i odbiera pacs.002 z wynikiem
+6. Status transferu aktualizowany: ACCP → `Completed` (saldo obciążone), RJCT → `Rejected` (rezerwacja zwolniona)
 
 **Przelew przychodzący (pacs.008 od innego banku):**
 
@@ -927,7 +934,7 @@ docker compose up --build
 
 Pierwsze uruchomienie pobiera obrazy i buduje kontenery — może potrwać kilka minut. Migracje bazy danych aplikują się automatycznie przy starcie.
 
-> Mock gateway (ACH/RTP/FedNow/KLIK) startuje automatycznie jako osobny serwis.
+> Mock gateway (ACH/RTP/FedNow/SWIFT/KLIK) startuje automatycznie jako osobny serwis.
 
 **Force rebuild** (po zmianach w Dockerfile lub zależnościach):
 
@@ -953,7 +960,6 @@ docker compose build --no-cache && docker compose up
 
 | Serwis | URL z hosta | Projekt |
 |---|---|---|
-| ACH Helper (json-to-ach) | http://localhost:8310 | `payment-settlement-systems/FedSystems` |
 | FedSystems SFTP | localhost:2221 | `payment-settlement-systems/FedSystems` |
 | FedNow MQ | http://localhost:8770 | `payment-settlement-systems/FedSystems` |
 | FedNow Central | http://localhost:8514 | `payment-settlement-systems/FedSystems` |
@@ -1094,7 +1100,7 @@ KLIK_WEBHOOK_SECRET=opcjonalny_sekret                         # nagłówek X-Web
 
 | Kanał | Port | Zachowanie |
 |---|---|---|
-| ACH | 6001 | Mock: przyjmuje `POST /json-to-ach` z JSON detalami przelewu, zwraca bajty NACHA |
+| ACH | 6001 | Mock async: akceptuje `POST /transfers`, odpowiada referenceId i wysyła webhook po opóźnieniu (AchGateway generuje NACHA i uploaduje do SFTP bezpośrednio — nie korzysta z tego mocka) |
 | RTP | 6002 | Mock: czeka kilka sekund i odpowiada synchronicznie `Completed` |
 | FedNow | 6003 | Mock: tak samo jak RTP |
 | SWIFT | 6004 | Mock: odpowiada natychmiast, webhook po dłuższym czasie. **Real SWIFT Middleware działa na porcie 3000.** |
